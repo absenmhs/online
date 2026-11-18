@@ -1,12 +1,13 @@
 import {post,probe} from './api.js';
 import {put,get,remove,owned} from './store.js';
 import {icon} from './icons.js';
+import {summarizeDaily,dayExplanation} from './daily.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ns='mhs:'+location.pathname.replace(/index\.html$/,'')+':'+window.MHS_CONFIG.apiUrl+':';
 const prefs=localStorage, temporary=sessionStorage;
-let session=null, tab='home', rows=[], queue=[], drafts=[], lastSync=0, verifier=[], loaded=false;
+let session=null, tab='home', rows=[], dailyRows=[], dailyMonth='', dailyLoaded=false, queue=[], drafts=[], lastSync=0, verifier=[], loaded=false;
 let period='', filter='Semua', gpsAt=0, synchronizing=false, capturing=false, toastTimer, reconnectTimer, installEvent, epoch=0;
 const pending='Menunggu verifikasi', titles={home:'Beranda',history:'Riwayat',doc:'Izin',user:'Profil',verify:'Verifikasi'};
 const labels={PENDING:pending,VERIFIED:'Disetujui',REJECTED:'Ditolak',NEEDS_CORRECTION:'Perlu koreksi',CONFIRMED:'Terkirim',CHECK_IN:'Check-in',CHECK_OUT:'Check-out',CHECKIN:'Check-in',CHECKOUT:'Check-out'};
@@ -34,7 +35,7 @@ function toast(t){$('#notice').textContent=t;clearTimeout(toastTimer);toastTimer
 function modal(title,body){$('#panel').innerHTML='<h2>'+esc(title)+'</h2>'+body+'<div id="feedback" role="status"></div>';if(!dialog.open)dialog.showModal()}
 function report(e){const t=describe(e)+(e.code&&!['CONFIG','TRANSPORT'].includes(e.code)?' ('+e.code+')':'');if(dialog.open&&$('#feedback'))$('#feedback').innerHTML=msg(t);else if($('#form-error'))$('#form-error').innerHTML=msg(t);else toast(t)}
 function saveSession(){temporary.setItem(ns+'session',JSON.stringify(session))}
-function clearSession(){epoch++;session=null;temporary.removeItem(ns+'session');rows=[];queue=[];drafts=[];verifier=[];loaded=false;lastSync=0;gpsAt=0;period='';filter='Semua';tab='home';if(dialog.open)dialog.close();render()}
+function clearSession(){epoch++;session=null;temporary.removeItem(ns+'session');rows=[];dailyRows=[];dailyMonth='';dailyLoaded=false;queue=[];drafts=[];verifier=[];loaded=false;lastSync=0;gpsAt=0;period='';filter='Semua';tab='home';if(dialog.open)dialog.close();render()}
 function valid(){return session&&Date.now()<session.expires}
 async function api(action,body={}){
   const current=session;
@@ -53,6 +54,7 @@ async function local(){
   if(stamp!==epoch)return;
   const receipts=new Map(q.filter(x=>x.confirmed).map(x=>[x.receipt,x]));
   rows=(cached?.items||[]).map(r=>({...r,capturedAt:receipts.get(r.recordId)?.at}));
+  const monthCache=cached?.dailyMonths?.[period];dailyRows=monthCache?.items||[];dailyLoaded=!!monthCache;dailyMonth=period;
   lastSync=cached?.at||0;queue=q.filter(x=>!x.confirmed);drafts=d;
 }
 function tick(){
@@ -65,7 +67,8 @@ function login(){
 }
 function passwordForm(){return '<form id="password"><label class="formlabel">Password saat ini<input class="control" required name="oldPassword" type="password" autocomplete="current-password"></label><label class="formlabel">Password baru · 12–128 karakter<input class="control" required minlength="12" maxlength="128" name="newPassword" type="password" autocomplete="new-password"></label><label class="formlabel">Ulangi password baru<input class="control" required name="confirm" type="password" autocomplete="new-password"></label><button class="primary full">Simpan password</button></form>'}
 function periodButton(){return btn('period',icon('calendar')+' '+esc(fmtDay(period+'-01',{month:'short',year:'numeric'}))+' ⌄','period')}
-function summary(items){const v=items.filter(r=>r.verificationStatus==='VERIFIED');const days=code=>new Set(v.filter(r=>r.finalStatus===code).map(r=>r.localDate)).size;return {days,verified:v.length}}
+// Rekap harian hanya dihitung dari MY_DAILY, bukan dari transaksi yang diverifikasi satu per satu.
+function summary(){return summarizeDaily(dailyMonth===period?dailyRows:[])}
 const colours=['HIJAU','KUNING','MERAH','BIRU','COKELAT'],colourText=['Hadir lengkap','Hadir sebagian','Tidak hadir/gagal','Izin resmi','Insiden'];
 const stat=(name,num,color,mark)=>'<div class="stat"><i style="--c:'+color+'">'+mark+'</i><b>'+num+'</b>'+name+'</div>';
 const byPeriod=()=>rows.filter(r=>dateISO(r.localDate).startsWith(period));
@@ -78,13 +81,13 @@ function backlog(){return queue.length?card(icon('refresh')+' Antrean perangkat'
 function dashboard(){
  const hr=Number(wib(now(),{hour:'2-digit',hourCycle:'h23'})), today=dateKey(now()), todays=rows.filter(r=>dateISO(r.localDate)===today);
  const status=a=>{const r=todays.find(x=>x.type===a);return r?label(r.verificationStatus):queue.some(q=>q.action===a.replace('_','')&&dateKey(q.at)===today)?'Dalam antrean':lastSync?'Belum tercatat':'Belum disinkronkan'};
- const stats=summary(byPeriod());
- return '<h1>Selamat '+(hr<11?'Pagi':hr<15?'Siang':hr<18?'Sore':'Malam')+' 👋</h1><section class="account"><img class="avatar" src="./assets/avatar.webp" alt=""><div class="details"><b>'+esc(session.name||session.username)+'</b><small>'+esc(session.employeeId)+'</small><small>'+icon('work')+' '+esc(session.unit||session.profession||'Outsourcing')+'</small></div>'+periodButton()+'</section><section class="card wave clock">'+icon('time')+'<div><strong><span id="clock"></span> <small>WIB</small></strong><b>'+esc(wib(now(),{weekday:'long',day:'numeric',month:'long',year:'numeric'}))+'</b>'+chip(session.clockSynced?'Acuan waktu server':'Waktu perangkat',session.clockSynced?'green':'yellow')+'</div></section><div class="badges">'+chip(navigator.onLine?'◈ Internet terhubung':'◈ Offline',navigator.onLine?'':'yellow')+btn('gps',icon('pin')+' '+(Date.now()-gpsAt<60000?'GPS aktif':'Cek GPS'),'chip green')+'</div><div class="two">'+btn('CHECKIN','Check-in','primary','enter')+btn('CHECKOUT','Check-out','success','enter')+'</div>'+card(icon('calendar')+' Status Absensi Hari Ini',actNames.map((_,i)=>{const a=['CHECK_IN','CHECK_OUT'][i];return line('<span class="dot '+(todays.some(r=>r.type===a)?'on':'')+'"></span>'+label(a),esc(status(a)))}).join(''))+backlog()+card(icon('bars')+' Ringkasan Status','<div class="five">'+colourText.map((c,i)=>stat(c,stats.days(colours[i]),['#0ca779','#f2ad18','#ee5358','#0785e9','#b05e2f'][i],['✓','◷','×','i','!'][i])).join('')+'</div>')+'<div class="three">'+btn('history','Riwayat<br>Absensi','tile','history')+btn('doc','Pengajuan<br>Izin','tile','doc')+btn('incident','Laporan<br>Insiden','tile','shield')+'</div>'+card(icon('history')+' Riwayat Terakhir',byPeriod().slice(0,2).map(r=>line(esc(fmtDay(r.localDate))+' · '+esc(label(r.type)),esc(label(r.verificationStatus)))).join('')||empty('Belum ada transaksi pada periode ini.'));
+ const stats=summary();
+ return '<h1>Selamat '+(hr<11?'Pagi':hr<15?'Siang':hr<18?'Sore':'Malam')+' 👋</h1><section class="account"><img class="avatar" src="./assets/avatar.webp" alt=""><div class="details"><b>'+esc(session.name||session.username)+'</b><small>'+esc(session.employeeId)+'</small><small>'+icon('work')+' '+esc(session.unit||session.profession||'Outsourcing')+'</small></div>'+periodButton()+'</section><section class="card wave clock">'+icon('time')+'<div><strong><span id="clock"></span> <small>WIB</small></strong><b>'+esc(wib(now(),{weekday:'long',day:'numeric',month:'long',year:'numeric'}))+'</b>'+chip(session.clockSynced?'Acuan waktu server':'Waktu perangkat',session.clockSynced?'green':'yellow')+'</div></section><div class="badges">'+chip(navigator.onLine?'◈ Internet terhubung':'◈ Offline',navigator.onLine?'':'yellow')+btn('gps',icon('pin')+' '+(Date.now()-gpsAt<60000?'GPS aktif':'Cek GPS'),'chip green')+'</div><div class="two">'+btn('CHECKIN','Check-in','primary','enter')+btn('CHECKOUT','Check-out','success','enter')+'</div>'+card(icon('calendar')+' Status Absensi Hari Ini',actNames.map((_,i)=>{const a=['CHECK_IN','CHECK_OUT'][i];return line('<span class="dot '+(todays.some(r=>r.type===a)?'on':'')+'"></span>'+label(a),esc(status(a)))}).join(''))+backlog()+card(icon('bars')+' Ringkasan Status','<div class="five">'+colourText.map((c,i)=>stat(c,stats[colours[i]],['#0ca779','#f2ad18','#ee5358','#0785e9','#b05e2f'][i],['✓','◷','×','i','!'][i])).join('')+'</div><p class="subhead">'+(dailyLoaded?'Berdasarkan keputusan kedua aktivitas per tanggal shift. Parsial A: '+stats.partialA+' · Parsial B: '+stats.partialB+' · Belum final: '+stats.unverified:'Rekap harian belum dimuat dari server. Tekan Riwayat atau Perbarui.')+'</p>')+'<div class="three">'+btn('history','Riwayat<br>Absensi','tile','history')+btn('doc','Pengajuan<br>Izin','tile','doc')+btn('incident','Laporan<br>Insiden','tile','shield')+'</div>'+card(icon('history')+' Riwayat Terakhir',byPeriod().slice(0,2).map(r=>line(esc(fmtDay(r.localDate))+' · '+esc(label(r.type)),esc(label(r.verificationStatus)))).join('')||empty('Belum ada transaksi pada periode ini.'));
 }
 function history(){
  const all=byPeriod(), filters=['Semua','Disetujui','Tertunda','Ditolak'], keys=['','VERIFIED','PENDING','REJECTED'];
  const list=all.filter(r=>filter==='Semua'||r.verificationStatus===keys[filters.indexOf(filter)]);
- return '<div class="between"><h1>'+icon('history')+' Riwayat Absensi</h1>'+periodButton()+'</div><section class="card wave four">'+['Transaksi','Disetujui','Tertunda','Ditolak'].map((n,i)=>stat(n,i?all.filter(r=>r.verificationStatus===keys[i]).length:all.length,['#167be0','#18ac6b','#f7b116','#f0525a'][i],['▦','✓','◷','×'][i])).join('')+'</section><div class="filters">'+filters.map(v=>btn('filter:'+v,v,filter===v?'chosen':'')).join('')+'</div>'+backlog()+(entries(list)||card('Riwayat pusat',empty('Belum ada transaksi yang cocok.')))+'<div class="card info">'+icon('info')+' '+(lastSync?'Pembaruan terakhir '+esc(wib(lastSync,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))+' WIB.':'Data pusat belum dimuat.')+' Maksimal 50 transaksi terakhir. '+btn('sync','Perbarui','link')+'</div>';
+ return '<div class="between"><h1>'+icon('history')+' Riwayat Absensi</h1>'+periodButton()+'</div><section class="card wave four">'+['Transaksi','Disetujui','Tertunda','Ditolak'].map((n,i)=>stat(n,i?all.filter(r=>r.verificationStatus===keys[i]).length:all.length,['#167be0','#18ac6b','#f7b116','#f0525a'][i],['▦','✓','◷','×'][i])).join('')+'</section><div class="filters">'+filters.map(v=>btn('filter:'+v,v,filter===v?'chosen':'')).join('')+'</div>'+backlog()+card('Rekap Kehadiran Harian',dailyLoaded?(dailyRows.length?dailyRows.slice().reverse().map(d=>line(esc(fmtDay(d.workDate)),esc(dayExplanation(d)))).join(''):empty('Belum ada status harian pada periode ini.')):empty('Rekap harian belum dimuat dari server.'))+(entries(list)||card('Riwayat pusat',empty('Belum ada transaksi yang cocok.')))+'<div class="card info">'+icon('info')+' '+(lastSync?'Pembaruan terakhir '+esc(wib(lastSync,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))+' WIB.':'Data pusat belum dimuat.')+' Maksimal 50 transaksi terakhir. '+btn('sync','Perbarui','link')+'</div>';
 }
 function leave(){
  return '<h1>'+icon('doc')+' Izin</h1><p class="subhead">Ajukan izin dan pantau status permohonan Anda.</p><section class="card wave between quota">'+icon('calendar')+'<span><small>Sisa cuti tahunan</small><b>—</b> hari</span><span><small>Sisa izin khusus</small><b>—</b> hari</span></section><div class="three">'+btn('newdraft','Ajukan Izin<small>Draf lokal</small>','tile','calendar')+btn('draftlist','Riwayat Izin<small>Lihat semua</small>','tile','history')+btn('rules','Ketentuan Izin<small>Informasi</small>','tile','info')+'</div>'+card(icon('doc')+' Riwayat Permohonan',drafts.length?drafts.slice().reverse().map(d=>line(esc(d.kind)+'<br><small>'+esc(fmtDay(d.day))+'</small>',btn('draft:'+d.id,'Draf lokal','chip yellow'))).join(''):empty('Belum ada draf permohonan.'))+'<div class="card info">'+icon('info')+' Draf tersimpan di perangkat. Pengajuan ke pengelola dan saldo cuti belum tersedia melalui API pilot.</div>';
@@ -129,8 +132,13 @@ async function synchronize(manual=false){
     }
    }
    if(session!==s)return;
+   const requestedMonth=period;
    const r=await api('MY_STATUS');if(session!==s)return;
-   await put('status',{owner,items:r.items,at:Date.now()});await local();
+   const daily=await api('MY_DAILY',{month:requestedMonth});if(session!==s)return;
+   if(daily.month!==requestedMonth||!Array.isArray(daily.items))throw Error('Format rekap harian server tidak valid.');
+   const previous=await get('status',owner),months={...(previous?.dailyMonths||{})};
+   months[requestedMonth]={items:daily.items,at:Date.now()};
+   await put('status',{owner,items:r.items,at:Date.now(),dailyMonths:months});await local();
   }
   if(manual&&session===s)toast(s.role==='EMPLOYEE'&&queue.length?'Antrean belum tuntas. Buka detail untuk melihat alasannya.':'Data pusat diperbarui.');
  }catch(e){if(session===s||!session)report(e)}
@@ -187,7 +195,7 @@ function showDraft(){
  modal('Ajukan izin','<p>Draf ini hanya tersimpan di perangkat. Sampaikan permohonan kepada pengelola melalui jalur yang berlaku.</p><form id="draft"><label class="formlabel">Jenis permohonan<select name="kind"><option>Izin sakit</option><option>Cuti tahunan</option><option>Izin mendadak</option></select></label><label class="formlabel">Tanggal<input class="control" type="date" name="day" required></label><label class="formlabel">Alasan<textarea rows="3" name="reason" required maxlength="500"></textarea></label><button class="primary full">Simpan draf</button></form>');
 }
 function details(r){
- modal('Detail absensi',line('Transaksi',esc(label(r.type)))+line('Tanggal',esc(fmtDay(r.localDate)))+(r.capturedAt?line('Waktu rekam perangkat',esc(localTime(r.capturedAt))+' WIB'):'')+line('Pengiriman',esc(label(r.deliveryStatus)))+line('Verifikasi',esc(label(r.verificationStatus)))+line('Status akhir',esc(r.finalStatus||'—'))+line('Revisi',esc(r.revision||'—'))+'<small class="mono">'+esc(r.recordId)+'</small>');
+ modal('Detail absensi',line('Transaksi',esc(label(r.type)))+line('Tanggal',esc(fmtDay(r.localDate)))+(r.capturedAt?line('Waktu rekam perangkat',esc(localTime(r.capturedAt))+' WIB'):'')+line('Pengiriman',esc(label(r.deliveryStatus)))+line('Verifikasi',esc(label(r.verificationStatus)))+line('Status akhir',esc(r.finalStatus||'—'))+line('Revisi',esc(r.revision||'—'))+(dailyRows.find(d=>d.workDate===dateISO(r.localDate))?line('Status harian',esc(dayExplanation(dailyRows.find(d=>d.workDate===dateISO(r.localDate))))):'')+'<small class="mono">'+esc(r.recordId)+'</small>');
 }
 async function act(a){
  const [key,arg]=a.split(':');
@@ -250,7 +258,7 @@ document.addEventListener('submit',async e=>{
     try{await start()}catch(err){clearSession();throw err}break}
   case 'password':if(input.newPassword!==input.confirm)throw Error('Konfirmasi password belum sesuai.');await api('CHANGE_PASSWORD',{oldPassword:input.oldPassword,newPassword:input.newPassword});clearSession();toast('Password tersimpan. Masuk kembali dengan password baru.');break;
   case 'decision':await api('VERIFY',{payload:{recordId:f.dataset.id,verificationStatus:input.verdict,finalStatus:input.verdict==='VERIFIED'?input.color:'',notes:input.notes.trim()}});dialog.close();verifier=verifier.filter(x=>x.recordId!==f.dataset.id);render();toast('Keputusan dicatat server.');await synchronize();break;
-  case 'month':period=input.month;dialog.close();render();break;
+  case 'month':period=input.month;dialog.close();await local();render();scheduleSync();break;
   case 'draft':if(!input.reason.trim())throw Error('Isi alasan permohonan.');await put('drafts',{id:crypto.randomUUID(),owner:own(),at:Date.now(),kind:input.kind,day:input.day,reason:input.reason.trim()});await local();dialog.close();render();toast('Draf izin tersimpan di perangkat.');break;
   }
  }catch(err){report(err)}finally{b.disabled=false;b.textContent=initial}
