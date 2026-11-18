@@ -1,12 +1,16 @@
 let opening;
 function db(){
   if(!opening)opening=new Promise((resolve,reject)=>{
-    const req=indexedDB.open('absen-mhs-pilot-'+new URL('.',document.baseURI).pathname,1);
+    const req=indexedDB.open('absen-mhs-pilot-'+new URL('.',document.baseURI).pathname,2);
     req.onupgradeneeded=()=>{
-      for(const [name,key] of [['queue','id'],['status','owner'],['drafts','id']])
-        req.result.createObjectStore(name,{keyPath:key});
+      for(const [name,key] of [['queue','id'],['status','owner'],['drafts','id'],['photos','owner']])
+        if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name,{keyPath:key});
     };
-    req.onsuccess=()=>resolve(req.result);
+    req.onsuccess=()=>{
+      req.result.onversionchange=()=>{req.result.close();opening=null};
+      resolve(req.result);
+    };
+    req.onblocked=()=>{opening=null;reject(Error('Tutup tab PWA lain, lalu muat ulang untuk memperbarui penyimpanan.'))};
     req.onerror=()=>{opening=null;reject(req.error)};
   });
   return opening;

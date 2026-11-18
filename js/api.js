@@ -1,3 +1,5 @@
+let timings = [];
+export const getTimings = () => timings.map(item => ({...item}));
 export class ApiError extends Error {
   constructor(code,message){super(message || code);this.code=code}
 }
@@ -19,7 +21,14 @@ async function read(url,options){
   finally{clearTimeout(timer)}
 }
 export async function post(action,body={}) {
+  const started = performance.now();
   const r=await read(endpoint(),{method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify({...body,action})});
+  if (r.timings) {
+    const durations = Object.fromEntries(Object.entries(r.timings)
+      .filter(([key,value]) => /^[a-zA-Z]+Ms$/.test(key) && Number.isFinite(value)));
+    timings.push({action, clientRequestMs:Math.round(performance.now()-started), ...durations});
+    timings = timings.slice(-12);
+  }
   if(!r.ok) throw new ApiError(r.code,r.message);
   return r;
 }

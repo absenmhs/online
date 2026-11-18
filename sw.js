@@ -1,6 +1,6 @@
 const prefix='mhs:'+new URL(self.registration.scope).pathname+':';
-const cacheName=prefix+'pilot-1.6.2';
-const files=['./','./index.html','./manifest.webmanifest','./css/app.css','./js/config.js','./js/app.js','./js/daily.js','./js/api.js','./js/store.js','./js/icons.js','./assets/brand.png','./assets/avatar.webp','./assets/mentaya.webp','./assets/icon-192.png','./assets/icon-512.png'];
+const cacheName=prefix+'pilot-1.7.0';
+const files=['./','./index.html','./manifest.webmanifest','./css/app.css','./js/config.js','./js/app.js','./js/daily.js','./js/photo.js','./js/refresh.js','./js/api.js','./js/store.js','./js/icons.js','./assets/brand.png','./assets/avatar.webp','./assets/mentaya.webp','./assets/icon-192.png','./assets/icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(cacheName).then(cache=>cache.addAll(files)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith(prefix)&&k!==cacheName).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{
@@ -10,7 +10,9 @@ self.addEventListener('fetch',event=>{
   if(req.mode!=='navigate'&&!files.includes(relative))return;
   event.respondWith((async()=>{
     const cache=await caches.open(cacheName),key=req.mode==='navigate'?'./index.html':relative;
-    try{const response=await fetch(req);if(response.ok&&response.type==='basic')await cache.put(key,response.clone());return response}
-    catch{const stored=await cache.match(key);return stored||Response.error()}
+    const stored=await cache.match(key);
+    if(stored)return stored;
+    try{return await fetch(req)}
+    catch{return Response.error()}
   })());
 });

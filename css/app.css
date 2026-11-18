@@ -748,3 +748,94 @@ button:hover {
     padding-bottom:62px;
   }
 }
+
+/* v1.7.0: local identity controls only; existing page layout retained. */
+.refresh-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.refresh-controls small { flex: 1; min-width: 130px; }
+.avatar { object-fit: cover; flex-shrink: 0; }
+.default-avatar {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(145deg,#c8eaff,#8bcaf5);
+  border: 2px solid #e5f5ff;
+}
+.avatar-body {
+  position: absolute;
+  width: 76%;
+  height: 44%;
+  bottom: -8%;
+  left: 12%;
+  border-radius: 50% 50% 0 0;
+  background: #bd934f;
+  border: 1px solid #9f7839;
+}
+.avatar-body::after {
+  content: "";
+  position: absolute;
+  width: 1px;
+  height: 76%;
+  background: #97713d;
+  left: 50%;
+  top: 22%;
+}
+.avatar-head {
+  position: absolute;
+  width: 43%;
+  height: 50%;
+  left: 28.5%;
+  top: 16%;
+  background: #f5c594;
+  border-radius: 45% 45% 43% 43%;
+  border: 1px solid #d69f71;
+}
+.avatar-head::before {
+  content: "";
+  position: absolute;
+  top: -8%;
+  left: -6%;
+  width: 111%;
+  height: 38%;
+  background: #343440;
+  border-radius: 70% 40% 45% 8%;
+}
+.avatar-eyes {
+  position: absolute;
+  left: 23%;
+  top: 49%;
+  width: 9%;
+  height: 8%;
+  background: #30343b;
+  border-radius: 50%;
+  box-shadow: 10px 0 #30343b;
+}
+.profile .avatar-eyes { box-shadow: 13px 0 #30343b; }
+.avatar-smile {
+  position: absolute;
+  left: 35%;
+  top: 66%;
+  width: 28%;
+  height: 14%;
+  border-bottom: 1px solid #9c5345;
+  border-radius: 50%;
+}
+.female .avatar-hair {
+  position: absolute;
+  left: 22%;
+  top: 10%;
+  width: 56%;
+  height: 70%;
+  border-radius: 45% 45% 16% 16%;
+  background: #343440;
+}
+.female .avatar-head::before { border-radius: 55% 70% 5% 60%; }
+.neutral { background: linear-gradient(145deg,#e5f1fa,#bdd4e7); }
+.neutral .avatar-head { background: #708ba5; border: 0; border-radius: 50%; top: 19%; height: 37%; width: 37%; left: 31.5%; }
+.neutral .avatar-body { background: #708ba5; border: 0; bottom: -11%; height: 46%; }
+.neutral .avatar-hair,.neutral .avatar-head::before,.neutral .avatar-body::after,
+.neutral .avatar-eyes,.neutral .avatar-smile { display: none; }
