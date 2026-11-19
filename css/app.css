@@ -848,15 +848,24 @@ button:hover {
 .clock-refresh[aria-busy=true] svg{animation:refresh-turn 1s linear infinite}
 @keyframes refresh-turn{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.clock-refresh[aria-busy=true] svg{animation:none}}
-.five .stat{min-width:0;padding-inline:2px}
+.five .stat{display:grid;grid-template-rows:22px 26px minmax(2.55em,auto);align-content:start;align-items:start;justify-items:center;row-gap:3px;min-width:0;padding:2px;line-height:1.25}
+.five .stat i{width:22px;height:22px;margin:0;color:#10283a}
+.five .stat b{margin:0;line-height:26px;font-size:23px;font-variant-numeric:tabular-nums}
+.five .stat span{overflow-wrap:anywhere}
+.audit-log{padding:8px 0;border-top:1px solid var(--line)}
+.audit-log small,.audit-log b{display:block}
+.audit-log p{margin:4px 0;overflow-wrap:anywhere;white-space:pre-wrap}
+.back-home{margin-top:8px}
+#colorlabel[hidden]{display:none}
 .calendar-card{padding:clamp(9px,3vw,20px)}
 .month-heading{display:flex;align-items:center;gap:6px;margin-bottom:12px}
 .month-heading h2{flex:1;margin:0}.month-heading button{font-size:23px;background:#edf4fa}
 .month-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
 .month-grid>span{text-align:center;font-size:.68rem;color:var(--muted);padding:5px 0}
-.cal-day{position:relative;display:grid;align-content:start;justify-items:start;min-height:63px;padding:5px 3px;border:1px solid #cbd9e3;border-radius:7px;font-variant-numeric:tabular-nums}
-.cal-day b{font-size:.78rem}.cal-day em{position:absolute;right:3px;top:5px;font-size:.58rem;font-style:normal}
-.cal-day small{min-height:12px;font-size:clamp(8px,2.2vw,11px);line-height:1.3;white-space:nowrap}
+.cal-day{display:grid;grid-template-rows:1rem .9rem .9rem .85rem;align-items:center;justify-items:center;min-width:0;padding:4px 1px;border:1px solid #cbd9e3;border-radius:7px;font-variant-numeric:tabular-nums;line-height:1}
+.cal-day b{font-size:.8rem}
+.cal-day em{font-size:.62rem;font-weight:700;font-style:normal}
+.cal-day small{font-size:clamp(10px,2.65vw,12px);white-space:nowrap}
 .cal-day[aria-current=date]{outline:2px solid #146dc0;outline-offset:-2px}
 [data-state=HIJAU]{background:#ceefdf;color:#104d38}[data-state=KUNING]{background:#ffedb2;color:#624910}
 [data-state=MERAH]{background:#ffd6d8;color:#7a232d}[data-state=BIRU]{background:#cee5ff;color:#19477c}
@@ -865,9 +874,7 @@ button:hover {
 [data-state=UPCOMING]{background:#eef5fa;color:#2e5167}[data-state=UNFINALIZED]{background:#e1e6e9;color:#384856}
 [data-state=PENDING]{background:#ffe0be;color:#70461d}[data-state=IN_PROGRESS]{background:#caecee;color:#1c5159}
 [data-state=REVIEW]{background:#efdaec;color:#68395b}
-.cal-legend{display:flex;flex-wrap:wrap;gap:6px 12px;margin:15px 0 8px}
-.cal-legend span,.calendar-card>small,.map-key{font-size:.72rem;color:var(--muted)}
-.cal-legend i{display:inline-block;width:11px;height:11px;border:1px solid #aabac8;border-radius:3px;margin-right:4px}
+.map-key{font-size:.72rem;color:var(--muted)}
 .day-block{border-top:1px solid var(--line);margin-top:12px;padding:4px 0 8px}.day-block h3{font-size:1rem;margin:.7em 0}
 dialog.recording{max-height:95svh;overflow:auto}.capture{display:grid;gap:9px}
 .camera-box{background:#162536;border-radius:14px;overflow:hidden;text-align:center;line-height:0}

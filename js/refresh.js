@@ -1,51 +1,38 @@
-/** One scheduler per page. Foreground events are coalesced; failures wait 180 seconds. */
-export function createRefreshScheduler(run, enabled, interval = 180000) {
-  let timer = null;
-  let active = null;
-  let generation = 0;
-  let lastAttempt = 0;
-  let rerun = false;
+/** One timer for the foreground session. A changed month/view supersedes a pending read. */
+export function createRefreshScheduler(run,enabled,interval=180000,scope=()=>''){
+  let timer,active=null,generation=0,lastAttempt=null,forceAfter=false;
 
-  function clearTimer() {
-    clearTimeout(timer);
-    timer = null;
+  function pause(){clearTimeout(timer);}
+  function arm(delay=interval){
+    pause();
+    if(enabled())timer=setTimeout(()=>refresh(),delay);
   }
-  function arm() {
-    clearTimer();
-    if (enabled()) timer = setTimeout(() => refresh(), interval);
-  }
-  function refresh(manual = false, force = false, queueAfter = false) {
-    if (!enabled()) return Promise.resolve();
-    if (active) {
-      // A changed period or newly queued transaction must get its own next read.
-      if (queueAfter) rerun = true;
+  function refresh(manual=false,force=false,queueAfter=false){
+    if(!enabled())return Promise.resolve();
+    if(active){
+      if(queueAfter)forceAfter=true;
       return active;
     }
-    if (!manual && !force && Date.now() - lastAttempt < interval) {
-      clearTimer();
-      timer = setTimeout(() => refresh(), interval - (Date.now() - lastAttempt));
-      return Promise.resolve();
-    }
-    clearTimer();
-    lastAttempt = Date.now();
-    const startedGeneration = generation;
-    active = Promise.resolve().then(() => run(manual)).finally(() => {
-      active = null;
-      if (startedGeneration !== generation) {
-        if (rerun) { rerun = false; refresh(false, true); }
-        return;
-      }
-      if (rerun) { rerun = false; refresh(false, true); }
-      else arm();
+    const remaining=lastAttempt===null?0:interval-(Date.now()-lastAttempt);
+    if(!manual&&!force&&remaining>0){arm(remaining);return Promise.resolve();}
+    pause();
+    const startedGeneration=generation;
+    let requestedScope;
+    active=Promise.resolve().then(()=>{
+      if(!enabled()||startedGeneration!==generation)return;
+      requestedScope=scope();
+      lastAttempt=Date.now();
+      return run(manual);
+    }).finally(()=>{
+      active=null;
+      const changed=startedGeneration!==generation||requestedScope!==scope();
+      const again=forceAfter||changed;
+      forceAfter=false;
+      if(enabled()&&again)return refresh(false,true);
+      arm();
     });
     return active;
   }
-  function pause() { clearTimer(); }
-  function reset() {
-    generation++;
-    lastAttempt = 0;
-    rerun = false;
-    clearTimer();
-  }
-  return {refresh, pause, reset};
+  function reset(){generation++;lastAttempt=null;forceAfter=false;pause();}
+  return {refresh,pause,reset};
 }

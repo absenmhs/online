@@ -25,7 +25,7 @@ export async function recordAttendance({dialog,title,type,call,send,alive,descri
   const panel=dialog.querySelector('#panel');
   panel.innerHTML='<h2></h2><section class="capture"><div class="camera-box"><video muted autoplay playsinline></video><img class="proof-preview" alt="Foto presensi untuk ditinjau" hidden></div>'+
     '<div class="mobile-test-banner" role="status" hidden style="padding:10px;background:#fff0c2;border:1px solid #d49e19;border-radius:8px;color:#5b4000;font-weight:bold"></div>'+
-    '<div class="capture-status" role="status"></div><div class="capture-geo'><b class="office-name"></b><div class="office-map" aria-label="Peta kantor dan perangkat"></div>'+
+    '<div class="capture-status" role="status"></div><div class="capture-geo"><b class="office-name"></b><div class="office-map" aria-label="Peta kantor dan perangkat"></div>'+
     '<small class="map-key">● Kantor dan radius &nbsp; <b>● Perangkat</b></small><p class="fix"></p></div>'+
     '<p class="countdown" hidden></p><div class="capture-actions"><button class="primary" data-c="lock" disabled>Kunci Lokasi</button>'+
     '<button class="primary" data-c="send" hidden>Kirim Presensi</button><button class="secondary" data-c="retake" hidden>Ambil Ulang Foto</button></div></section>';
@@ -35,7 +35,7 @@ export async function recordAttendance({dialog,title,type,call,send,alive,descri
     clock=$('.countdown'),fixText=$('.fix'),map=$('.office-map'),banner=$('.mobile-test-banner'),lock=$('[data-c=lock]'),submit=$('[data-c=send]'),retake=$('[data-c=retake]');
   const abort=new AbortController(),events={signal:abort.signal};
   let phase='setup',stream,model,watch=null,frame=0,pulse=null,office,info,fix,lockState,image='',steps=[],digest='',
-    infoAt=0,expiresPerf=0,expiresWall=0,disposed=false,challengeEnd=0,sendStarted=false;
+    frontReady=false,infoAt=0,expiresPerf=0,expiresWall=0,disposed=false,challengeEnd=0,sendStarted=false;
   const current=()=>!disposed&&dialog.open&&alive();
   const api=(route,payload)=>call(route,{payload});
   const cameraOff=()=>{stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;};
@@ -65,7 +65,7 @@ export async function recordAttendance({dialog,title,type,call,send,alive,descri
     const good=fix&&Date.now()-fix.at<=15000&&Date.now()>=fix.at-1000;
     const distance=fix?distanceTo(office,fix):0;
     const inside=good&&fix.gpsAccuracy>0&&fix.gpsAccuracy<=office.maxAccuracy&&distance+fix.gpsAccuracy<=office.radius;
-    lock.disabled=!(phase==='location'&&inside&&model&&video.readyState>=2);
+    lock.disabled=!(phase==='location'&&inside&&model&&frontReady&&video.readyState>=2);
     if(fix)fixText.textContent=(good?'':'Sampel GPS kedaluwarsa · ')+
       'Jarak '+Math.round(distance)+' m · Akurasi ±'+Math.ceil(fix.gpsAccuracy)+' m · Radius '+office.radius+' m'+
       (inside?' · Dalam area':' · Tunggu posisi yang memenuhi batas');
@@ -100,7 +100,22 @@ export async function recordAttendance({dialog,title,type,call,send,alive,descri
     if(!current()||phase!=='setup')return;
     const detector=await loadLandmarker().catch(()=>{throw Error('Model wajah belum dapat dimuat. Periksa internet dan dukungan WebAssembly browser, lalu rekam ulang.');});
     if(!current()||phase!=='setup'){detector.close();return;}
-    model=detector;phase='location';status.textContent='Posisikan wajah di kamera, lalu kunci lokasi.';updateFix();
+    model=detector;phase='location';status.textContent='Hadapkan wajah ke kamera, lalu kunci lokasi.';
+    let stable=0,lastInference=-1000,lastTime=-1;
+    function align(t){
+      if(!current()||phase!=='location')return;
+      try{
+        if(video.readyState>=2&&video.currentTime!==lastTime&&t-lastInference>=80){
+          lastTime=video.currentTime;lastInference=t;
+          const pose=readPose(model.detectForVideo(video,t));
+          stable=poseMatches('neutral',pose)?stable+1:0;
+          frontReady=stable>=3;
+          updateFix();
+        }
+        frame=requestAnimationFrame(align);
+      }catch(error){fail(describe(error));}
+    }
+    frame=requestAnimationFrame(align);
   }
   async function begin(){
     updateFix();if(lock.disabled||phase!=='location')return;
@@ -113,7 +128,7 @@ export async function recordAttendance({dialog,title,type,call,send,alive,descri
     lockState=reply;challengeEnd=performance.now()+reply.challengeEnds-reply.serverNow;
     if(watch!==null){navigator.geolocation.clearWatch(watch);watch=null;}
     geo.hidden=true;lock.hidden=true;phase='challenge';
-    let stageStart=performance.now(),frames=0,neutral=false,lastTime=-1,lastInference=-1000;
+    let stageStart=performance.now(),frames=0,lastTime=-1,lastInference=-1000;
     function detect(t){
       if(!current()||phase!=='challenge')return;
       try{
@@ -121,19 +136,18 @@ export async function recordAttendance({dialog,title,type,call,send,alive,descri
         if(video.currentTime!==lastTime&&video.readyState>=2&&t-lastInference>=80){
           lastTime=video.currentTime;lastInference=t;
           const pose=readPose(model.detectForVideo(video,t)),action=reply.order[steps.length];
-          status.textContent='Langkah '+(steps.length+1)+'/3 · '+(!pose?'Tampilkan tepat satu wajah':neutral?directions[action]:'Tatap kamera dengan ekspresi netral');
-          if(!pose){neutral=false;frames=0;}
-          else if(poseMatches(neutral?action:'neutral',pose)){
-            frames++;
-            if(frames>=3){
-              if(!neutral){neutral=true;frames=0;}
-              else{
-                steps.push({action,seconds:Math.max(0.001,Math.round(t-stageStart)/1000),frames});
-                if(steps.length===reply.order.length){review().catch(handleError);return;}
-                neutral=false;frames=0;stageStart=t;
-              }
+          status.textContent='Langkah '+(steps.length+1)+'/3 · '+directions[action]+(!pose?' · Tampilkan tepat satu wajah':'');
+          frames=poseMatches(action,pose)?frames+1:0;
+          if(frames>=3){
+            if(action==='SMILE'){
+              image=snapshot(video);
+              expiresPerf=performance.now()+300000;
+              expiresWall=Date.now()+300000;
             }
-          }else frames=0;
+            steps.push({action,seconds:Math.max(0.001,Math.round(t-stageStart)/1000),frames});
+            if(steps.length===reply.order.length){review().catch(handleError);return;}
+            frames=0;stageStart=t;
+          }
         }
         frame=requestAnimationFrame(detect);
       }catch(e){fail(e.message);}
@@ -152,7 +166,8 @@ export async function recordAttendance({dialog,title,type,call,send,alive,descri
     }else if(phase==='review')submit.disabled=!navigator.onLine;
   }
   async function review(){
-    image=snapshot(video);phase='sealing';expiresPerf=performance.now()+300000;expiresWall=Date.now()+300000;
+    if(!image)throw Error('Foto senyum belum terekam. Ulangi perekaman.');
+    phase='sealing';
     photo.src=image;photo.hidden=false;video.hidden=true;halt();clock.hidden=false;updateClock();
     retake.hidden=false;status.textContent='Tantangan selesai. Mengonfirmasi waktu bukti…';
     digest=await digestPhoto(image);if(!current()||phase!=='sealing')return;

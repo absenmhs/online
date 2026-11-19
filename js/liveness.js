@@ -19,10 +19,10 @@ export function readPose(result){
   const smile=Math.min(value('mouthSmileLeft'),value('mouthSmileRight'));
   return Number.isFinite(yaw)&&Number.isFinite(smile)?{yaw,smile}:null;
 }
-export const directions={TURN_LEFT:'Toleh ke kiri Anda',TURN_RIGHT:'Toleh ke kanan Anda',SMILE:'Senyum ke kamera'};
+export const directions={TURN_LEFT:'Tengok Kiri',TURN_RIGHT:'Tengok Kanan',SMILE:'Senyum menghadap kamera'};
 export function poseMatches(action,pose){
   if(!pose)return false;
   if(action==='neutral')return Math.abs(pose.yaw)<0.12&&pose.smile<0.36;
-  if(action==='SMILE')return Math.abs(pose.yaw)<0.18&&pose.smile>=0.55;
+  if(action==='SMILE')return Math.abs(pose.yaw)<0.12&&pose.smile>=0.55;
   return action==='TURN_LEFT'?pose.yaw>0.24:action==='TURN_RIGHT'&&pose.yaw< -0.24;
 }
