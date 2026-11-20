@@ -23,6 +23,8 @@ export function dayExplanation(day){
  if(day.finalStatus==='MERAH')return 'Tidak hadir/gagal · Tidak ada Check-in yang disetujui';
  if(day.finalStatus==='BIRU')return 'Izin resmi';
  if(day.finalStatus==='COKELAT')return 'Insiden';
+ if(day.partialReason==='REQUEST_PENDING')return 'Menunggu keputusan permohonan';
+ if(day.partialReason==='REQUEST_CONFLICT')return 'Perlu rekonsiliasi permohonan dan presensi';
  if(day.stage==='IN_PROGRESS')return 'Masih dalam jendela Check-out';
  if(day.stage==='REVIEW')return 'Perlu peninjauan data';
  return 'Menunggu verifikasi';

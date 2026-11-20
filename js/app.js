@@ -1,3 +1,5 @@
+import {esc,btn,chip,msg,card,line,empty} from './ui.js';
+import {requestNames,normalizeDraft,requestList,leavePage,requestForm,requestDetail,lateCard,previewCard} from './views200.js';
 import {recordAttendance} from './capture.js';
 import {post,probe,getTimings} from './api.js';
 import {put,get,remove,owned} from './store.js';
@@ -7,7 +9,6 @@ import {createRefreshScheduler} from './refresh.js';
 import {avatarKind, photoURL, preparePhoto, savePhoto, deletePhoto} from './photo.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
-const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ns='mhs:'+location.pathname.replace(/index\.html$/,'')+':'+window.MHS_CONFIG.apiUrl+':';
 const prefs=localStorage, temporary=sessionStorage;
 let session=null, tab='home', rows=[], dailyRows=[], dailyMonth='', dailyLoaded=false, queue=[], drafts=[], lastSync=0, verifier=[], loaded=false;
@@ -15,8 +16,16 @@ let period='', filter='Semua', gpsAt=0, synchronizing=false, capturing=false, to
 let profilePhoto = '', photoGeneration = 0, refreshError = '', refreshDeferred = false;
 let expiredRows=[],todayRows=[],calendarDays=[], category='', dayReturn='';
 let audit=null, auditEmployee='', reviewOpen=false, deciding=false;
+let requestData=null, lateness=null, preview=[], previewMonth='';
+const mobilePreview=()=>navigator.onLine&&previewMonth===period?preview:[];
+function clearPreview(){preview=[];previewMonth='';document.querySelectorAll('[data-test-preview]').forEach(el=>el.remove());}
+const requestItems=()=>{
+ const byId=new Map(drafts.map(d=>[d.id,normalizeDraft(d)]));
+ for(const r of requestData?.items||[])byId.set(r.id,r);
+ return [...byId.values()].sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+};
 let verifierNetwork=Promise.resolve();
-const refreshScope=()=>session?.role==='VERIFIER'?(tab==='audit'?'audit':'queue'):period;
+const refreshScope=()=>session?.role==='VERIFIER'?((tab==='audit'?'audit':'queue')+period):period;
 let foregroundOffline = !navigator.onLine;
 const refreshScheduler = createRefreshScheduler(
   manual => synchronize(manual),
@@ -38,18 +47,12 @@ function dateISO(s){
 }
 const fmtDay=(s,opts={day:'numeric',month:'short',year:'numeric'})=>dateISO(s)?wib(new Date(dateISO(s)+'T12:00:00+07:00'),opts):s;
 const describe=e=>errors[e.code]||e.message||'Permintaan gagal.';
-const btn=(action,txt,cls='secondary',ic='')=>'<button type="button" data-act="'+action+'" class="'+cls+'">'+(ic?icon(ic)+' ':'')+txt+'</button>';
-const chip=(s,cls='')=>'<span class="chip '+cls+'">'+esc(s)+'</span>';
-const msg=t=>'<p class="message" role="status">'+esc(t)+'</p>';
-const card=(title,body)=>'<section class="card"><h2>'+title+'</h2>'+body+'</section>';
-const line=(a,b)=>'<div class="line"><span>'+a+'</span><b>'+b+'</b></div>';
-const empty=t=>'<div class="empty">'+esc(t)+'</div>';
 const actNames=['CHECKIN','CHECKOUT'];
 function toast(t){$('#notice').textContent=t;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#notice').textContent='',6500)}
 function modal(title,body){$('#panel').innerHTML='<h2>'+esc(title)+'</h2>'+body+'<div id="feedback" role="status"></div>';if(!dialog.open)dialog.showModal()}
 function report(e){const t=describe(e)+(e.code&&!['CONFIG','TRANSPORT'].includes(e.code)?' ('+e.code+')':'');if(dialog.open&&$('#feedback'))$('#feedback').innerHTML=msg(t);else if($('#form-error'))$('#form-error').innerHTML=msg(t);else toast(t)}
 function saveSession(){temporary.setItem(ns+'session',JSON.stringify(session))}
-function clearSession(){audit=null;auditEmployee='';reviewOpen=false;deciding=false;category='';dayReturn='';calendarDays=[];todayRows=[];expiredRows=[];epoch++;refreshScheduler.reset();photoGeneration++;setPhotoURL('');refreshError='';refreshDeferred=false;session=null;temporary.removeItem(ns+'session');rows=[];dailyRows=[];dailyMonth='';dailyLoaded=false;queue=[];drafts=[];verifier=[];loaded=false;lastSync=0;gpsAt=0;period='';filter='Semua';tab='home';if(dialog.open)dialog.close();render()}
+function clearSession(){requestData=null;lateness=null;clearPreview();audit=null;auditEmployee='';reviewOpen=false;deciding=false;category='';dayReturn='';calendarDays=[];todayRows=[];expiredRows=[];epoch++;refreshScheduler.reset();photoGeneration++;setPhotoURL('');refreshError='';refreshDeferred=false;session=null;temporary.removeItem(ns+'session');rows=[];dailyRows=[];dailyMonth='';dailyLoaded=false;queue=[];drafts=[];verifier=[];loaded=false;lastSync=0;gpsAt=0;period='';filter='Semua';tab='home';if(dialog.open)dialog.close();render()}
 function valid(){return session&&Date.now()<session.expires}
 async function api(action,body={}){
   const current=session;
@@ -75,7 +78,7 @@ function applyContext(result) {
   Object.assign(current, {
     name:result.name || result.username || current.username,
     profession:result.profession, locationId:result.locationId, unit:result.unit,
-    gender:result.gender || '', passwordPolicy:result.passwordPolicy || current.passwordPolicy,
+    registeredAt:result.registeredAt??current.registeredAt??'',gender:result.gender || '', passwordPolicy:result.passwordPolicy || current.passwordPolicy,
     mustChangePassword:!!result.mustChangePassword,
     contextDay:dateKey(result.serverEpoch || Date.now()),
     offset:result.serverEpoch ? result.serverEpoch-Date.now() : current.offset || 0,
@@ -150,19 +153,18 @@ async function local(){
   const [cached,q,d]=await Promise.all([get('status',owner),owned('queue',owner),owned('drafts',owner)]);
   if(stamp!==epoch||period!==month)return;
   const receipts=new Map(q.filter(x=>x.confirmed).map(x=>[x.receipt,x]));
+  if(session.role==='EMPLOYEE')requestData=cached?.requests||null;
+  if(session.role==='EMPLOYEE')lateness=cached?.dailyMonths?.[period]?.lateness||null;
   const cachedQueue=cached?.verifier;
   loaded=Array.isArray(cachedQueue)&&cachedQueue.every(r=>typeof r.mobileTest==='boolean');
   verifier=loaded?cachedQueue:[];
   const monthCache=cached?.dailyMonths?.[period];
-  calendarDays=monthCache?.calendar||[];
-  const daily=monthCache?.items||[];
-  const effective=new Set(daily.flatMap(d=>[d.checkInRecordId,d.checkOutRecordId]).filter(Boolean));
-  // Older cache entries can contain unlabeled Mobile Test rows. Only the daily
-  // record IDs can corroborate them offline until this month is refreshed.
-  todayRows=cached?.scope190?cached.todayRows||[]:[];
-  const transactions=monthCache?.transactions||[];
-  rows=(monthCache?.scope190?transactions:transactions.filter(r=>effective.has(r.recordId))).map(r=>({...r,capturedAt:receipts.get(r.recordId)?.at}));
-  dailyRows=monthCache?.items||[];dailyLoaded=!!monthCache;dailyMonth=period;
+  const trusted=monthCache?.scope200===true;
+  calendarDays=trusted?monthCache.calendar||[]:[];
+  // Refill older status projections online; keep all queues, drafts and profile data.
+  todayRows=cached?.scope200?cached.todayRows||[]:[];
+  rows=(trusted?monthCache.transactions||[]:[]).map(r=>({...r,capturedAt:receipts.get(r.recordId)?.at}));
+  dailyRows=trusted?monthCache.items||[]:[];dailyLoaded=trusted;dailyMonth=period;
   expiredRows=q.filter(q=>q.retired&&Date.now()-q.retiredAt<86400000);
   lastSync=cached?.at||0;queue=q.filter(x=>!x.confirmed&&!x.retired);drafts=d;
 }
@@ -173,7 +175,7 @@ function tick(){
 }
 function login(){
   app.className='login';
-  app.innerHTML='<div class="identity"><img src="./assets/brand.png" alt="Logo MHS"><h1>Absensi Kehadiran Outsourcing</h1><p>Kecamatan Mentaya Hilir Selatan</p></div><form class="loginbox" id="login"><h2>Selamat Datang!</h2><p>Platform ini adalah sistem terintegrasi untuk mengelola presensi pegawai Kecamatan Mentaya Hilir Selatan.</p><div class="fields"><label class="field">'+icon('user')+'<input name="username" aria-label="Username" placeholder="Username" autocomplete="username" required maxlength="40" value="'+esc(prefs.getItem(ns+'username')||'')+'"></label><label class="field">'+icon('lock')+'<input type="password" name="password" aria-label="Password" placeholder="Password" autocomplete="current-password" required maxlength="256"><button data-act="eye" type="button" aria-label="Tampilkan password">'+icon('eye')+'</button></label></div><div class="loginopts"><label><input type="checkbox" name="remember" '+(prefs.getItem(ns+'username')?'checked':'')+'> Ingat Saya</label>'+btn('forgot','Lupa Password?','link')+'</div><div id="form-error"></div><button class="primary full">'+icon('enter')+' Masuk</button></form>';
+  app.innerHTML='<div class="identity"><img src="./assets/icon-512.png" alt="Lambang Kabupaten Kotawaringin Timur"><h1>Absensi Kehadiran Outsourcing</h1><p>Kabupaten Kotawaringin Timur</p></div><form class="loginbox" id="login"><h2>Selamat Datang!</h2><p>Platform ini adalah sistem terintegrasi untuk mengelola presensi pegawai Kabupaten Kotawaringin Timur.</p><div class="fields"><label class="field">'+icon('user')+'<input name="username" aria-label="Username" placeholder="Username" autocomplete="username" required maxlength="40" value="'+esc(prefs.getItem(ns+'username')||'')+'"></label><label class="field">'+icon('lock')+'<input type="password" name="password" aria-label="Password" placeholder="Password" autocomplete="current-password" required maxlength="256"><button data-act="eye" type="button" aria-label="Tampilkan password">'+icon('eye')+'</button></label></div><div class="loginopts"><label><input type="checkbox" name="remember" '+(prefs.getItem(ns+'username')?'checked':'')+'> Ingat Saya</label>'+btn('forgot','Lupa Password?','link')+'</div><div id="form-error"></div><button class="primary full">'+icon('enter')+' Masuk</button></form>';
 }
 function passwordForm() {
   const policy = session?.passwordPolicy || {minLength:8,maxLength:128};
@@ -230,8 +232,8 @@ function dashboard(){
    '<div class="two">'+actions+'</div>'+(session.writeOpen===false?msg('Presensi sementara belum dibuka oleh pengelola.'):'')+
    card(icon('calendar')+' Status Absensi Hari Ini',todayLines)+backlog()+
    card(icon('bars')+' Ringkasan Status','<div class="five">'+counts+'</div>')+
-   '<div class="three">'+btn('history','Riwayat<br>Absensi','tile','history')+btn('doc','Pengajuan<br>Izin','tile','doc')+btn('incident','Laporan<br>Insiden','tile','shield')+'</div>'+
-   card(icon('history')+' Riwayat Terakhir',byPeriod().slice(0,2).map(r=>line(esc(fmtDay(r.localDate))+' · '+esc(label(r.type)),esc(label(r.verificationStatus)))).join('')||empty('Belum ada transaksi pada periode ini.'));
+   '<div class="three">'+btn('history','Riwayat<br>Absensi','tile','history')+btn('newdraft','Pengajuan<br>Izin','tile','doc')+btn('incident','Laporan<br>Insiden','tile','shield')+'</div>'+
+   lateCard(lateness,period,false,periodButton)+card(icon('history')+' Riwayat Terakhir',byPeriod().slice(0,2).map(r=>line(esc(fmtDay(r.localDate))+' · '+esc(label(r.type)),esc(label(r.verificationStatus)))).join('')||empty('Belum ada transaksi pada periode ini.'));
 }
 function history(){
  const days=category?dailyRows.filter(d=>d.finalStatus===category):dailyRows;
@@ -244,7 +246,7 @@ function history(){
    '<section class="card wave four">'+['Transaksi','Disetujui','Tertunda','Ditolak'].map((n,i)=>stat(n,i?all.filter(r=>r.verificationStatus===keys[i]).length:all.length,['#167be0','#18ac6b','#f7b116','#f0525a'][i],['▦','✓','◷','×'][i])).join('')+'</section>'+
    '<div class="filters">'+filters.map(v=>btn('filter:'+v,v,filter===v?'chosen':'')).join('')+'</div>'+
    (category?'':backlog()+expiredRows.map(q=>msg(label(q.action)+' · '+q.issue)).join(''))+card('Rekap Kehadiran Harian',days.length?days.slice().reverse().map(d=>line(btn('day:'+d.workDate,esc(fmtDay(d.workDate)),'link'),esc(dayExplanation(d)))).join(''):empty(dailyLoaded?'Belum ada hari dalam kategori ini.':'Rekap belum dimuat.'))+
-   (entries(list)||card('Transaksi',empty('Belum ada transaksi yang cocok.')))+btn('home','Kembali ke Beranda','secondary full back-home','home');
+   (category?'':previewCard(mobilePreview()))+(entries(list)||card('Transaksi',empty('Belum ada transaksi yang cocok.')))+btn('home','Kembali ke Beranda','secondary full back-home','home');
 }
 const states={HOLIDAY:'Libur',UNSCHEDULED:'Belum terjadwal',UPCOMING:'Terjadwal',UNFINALIZED:'Belum final',IN_PROGRESS:'Shift berjalan',PENDING:'Menunggu verifikasi',REVIEW:'Perlu ditinjau'};
 const stateName=state=>states[state]||colourText[colours.indexOf(state)]||'Belum dimuat';
@@ -272,7 +274,7 @@ function calendar(){
  }).join('');
  return '<h1>'+icon('calendar')+' Shift</h1><section class="card calendar-card">'+heading+
    (cells?'<div class="month-grid">'+['Sen','Sel','Rab','Kam','Jum','Sab','Min'].map(d=>'<span>'+d+'</span>').join('')+
-     '<i></i>'.repeat(indent)+cells+'</div>':empty('Kalender bulan ini belum dimuat.'))+'</section>';
+     '<i></i>'.repeat(indent)+cells+'</div>':empty('Kalender bulan ini belum dimuat.'))+'</section>'+previewCard(mobilePreview());
 }
 function showDay(date){
  const d=calendarDays.find(x=>x.workDate===date);
@@ -284,23 +286,24 @@ function showDay(date){
  }).join('');
  modal('Detail Presensi Harian',line('Tanggal shift',esc(fmtDay(date,{weekday:'long',day:'numeric',month:'long',year:'numeric'})))+
    line('Jenis shift',esc(d.shift||'Belum terjadwal'))+line('Jadwal masuk–pulang',esc(d.start&&d.end?d.start+' – '+d.end+(d.nextDay?' (+1 hari)':''):'—'))+
-   line('Status harian',esc(daily&&d.state!=='REVIEW'?dayExplanation(daily):stateName(d.state)))+blocks);
+   line('Status harian',esc(daily&&d.state!=='REVIEW'?dayExplanation(daily):stateName(d.state)))+blocks+previewCard(mobilePreview(),date));
 }
 function leave(){
- return '<h1>'+icon('doc')+' Izin</h1><p class="subhead">Ajukan izin dan pantau status permohonan Anda.</p><section class="card wave between quota">'+icon('calendar')+'<span><small>Sisa cuti tahunan</small><b>—</b> hari</span><span><small>Sisa izin khusus</small><b>—</b> hari</span></section><div class="three">'+btn('newdraft','Ajukan Izin<small>Draf lokal</small>','tile','calendar')+btn('draftlist','Riwayat Izin<small>Lihat semua</small>','tile','history')+btn('rules','Ketentuan Izin<small>Informasi</small>','tile','info')+'</div>'+card(icon('doc')+' Riwayat Permohonan',drafts.length?drafts.slice().reverse().map(d=>line(esc(d.kind)+'<br><small>'+esc(fmtDay(d.day))+'</small>',btn('draft:'+d.id,'Draf lokal','chip yellow'))).join(''):empty('Belum ada draf permohonan.'))+'<div class="card info">'+icon('info')+' Draf tersimpan di perangkat. Pengajuan ke pengelola dan saldo cuti belum tersedia melalui API pilot.</div>';
+ return leavePage({data:requestData,items:requestItems(),day:dateKey(now()),registered:session.registeredAt,fmtDay});
 }
 function menu(act,ic,title,sub){return btn(act,'<span><b>'+title+'</b><small>'+sub+'</small></span>','card menu',ic)}
 function profile(){
- return '<h1>'+icon('user')+' Profil Saya</h1><section class="account profile wave">'+avatar()+'<div class="details"><b>'+esc(session.name||session.username)+'</b><small>'+esc(session.employeeId)+'</small><small>'+icon('work')+' '+esc(session.unit||session.profession||session.role)+'</small>'+chip(session.role==='VERIFIER'?'Verifikator':'Pegawai aktif','green')+'</div></section>'+menu('photo','user','Foto Profil','Ganti atau hapus foto di perangkat ini')+menu('account','user','Informasi '+(session.role==='VERIFIER'?'Verifikator':'Pegawai'),'Data akun dan unit kerja')+(session.role==='EMPLOYEE'?menu('schedule','calendar','Jadwal Kerja','Jadwal terakhir dari server'):'')+menu('settings','settings','Pengaturan Aplikasi','Pemasangan dan keamanan akun')+menu('about','info','Tentang Aplikasi','Absensi Kehadiran Outsourcing · Pilot')+menu('help','info','Bantuan & Panduan','Panduan penggunaan aplikasi')+menu('logout','enter','Keluar','Keluar dari aplikasi')+'<p class="foot">Absensi Kehadiran Outsourcing<br>Kecamatan Mentaya Hilir Selatan</p>';
+ return '<h1>'+icon('user')+' Profil Saya</h1><section class="account profile wave">'+avatar()+'<div class="details"><b>'+esc(session.name||session.username)+'</b><small>'+esc(session.employeeId)+'</small><small>'+icon('work')+' '+esc(session.unit||session.profession||session.role)+'</small>'+chip(session.role==='VERIFIER'?'Verifikator':'Pegawai aktif','green')+'</div></section>'+menu('photo','user','Foto Profil','Ganti atau hapus foto di perangkat ini')+menu('account','user','Informasi '+(session.role==='VERIFIER'?'Verifikator':'Pegawai'),'Data akun dan unit kerja')+(session.role==='EMPLOYEE'?menu('schedule','calendar','Jadwal Kerja','Jadwal terakhir dari server'):'')+menu('settings','settings','Pengaturan Aplikasi','Pemasangan dan keamanan akun')+menu('about','info','Tentang Aplikasi','Absensi Kehadiran Outsourcing · Pilot')+menu('help','info','Bantuan & Panduan','Panduan penggunaan aplikasi')+menu('logout','enter','Keluar','Keluar dari aplikasi')+'<p class="foot">Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p>';
 }
-function verification(){return '<h1>'+icon('shield')+' Verifikasi Absensi</h1><p class="subhead">Tinjau transaksi pilot yang menunggu keputusan.</p><div class="card wave between"><b>'+verifier.length+' transaksi dalam antrean</b><button data-act="sync" class="clock-refresh" aria-label="Perbarui antrean" title="Perbarui antrean">'+icon('refresh')+'</button></div>'+(!navigator.onLine?msg('Koneksi diperlukan untuk memuat dan memutuskan transaksi.'):'')+(verifier.map(r=>'<button class="card entry" data-review="'+esc(r.recordId)+'">'+icon('calendar')+'<span><b>'+esc(r.employeeName||'Nama pegawai belum tersedia')+' · '+esc(label(r.type))+'</b><small>'+esc(fmtDay(r.localDate))+(r.mobileTest?' · MODE UJI · GPS dan waktu simulasi':'')+'</small></span>'+chip('Tinjau','yellow')+'</button>').join('')||card('Antrean verifikator',empty(loaded?'Tidak ada transaksi yang menunggu keputusan.':'Antrean pusat belum dimuat.')))}
+function verification(){return '<h1>'+icon('shield')+' Verifikasi Absensi</h1><p class="subhead">Tinjau transaksi pilot yang menunggu keputusan.</p><div class="card wave between"><b>'+verifier.length+' transaksi dalam antrean</b><button data-act="sync" class="clock-refresh" aria-label="Perbarui antrean" title="Perbarui antrean">'+icon('refresh')+'</button></div>'+(!navigator.onLine?msg('Koneksi diperlukan untuk memuat dan memutuskan transaksi.'):'')+(verifier.map(r=>'<button class="card entry" data-review="'+esc(r.recordId)+'">'+icon('calendar')+'<span><b>'+esc(r.employeeName||'Nama pegawai belum tersedia')+' · '+esc(label(r.type))+'</b><small>'+esc(fmtDay(r.localDate))+(r.mobileTest?' · MODE UJI · GPS dan waktu simulasi':'')+'</small></span>'+chip('Tinjau','yellow')+'</button>').join('')||card('Antrean verifikator',empty(loaded?'Tidak ada transaksi yang menunggu keputusan.':'Antrean pusat belum dimuat.')))+
+   lateCard(lateness,period,true,periodButton)+(requestData?.reviewer?card('Permohonan pegawai',requestList(requestData.items,true)):'')}
 function render(){
  if(!session){login();return}
  app.className='';
  if(session.mustChangePassword){app.innerHTML='<div class="shell"><div class="card"><h1>Ganti password awal</h1><p>Tetapkan password pribadi untuk melanjutkan.</p>'+passwordForm()+'<div id="form-error"></div>'+btn('logout','Keluar','link')+'</div></div>';return}
  const isV=session.role==='VERIFIER', pages=isV?['verify','audit','user']:['home','calendar','doc','user'];
  if(!pages.includes(tab)&&(isV||tab!=='history'))tab=pages[0];
- app.innerHTML='<div class="shell"><header class="top"><img src="./assets/brand.png" alt=""><div><strong>Absensi Kehadiran Outsourcing</strong><small>Kecamatan Mentaya Hilir Selatan</small></div><button aria-label="Status sinkronisasi" data-act="updates">'+icon('bell')+'</button></header><div id="page">'+refreshNotice()+({home:dashboard,history,calendar,doc:leave,user:profile,verify:verification,audit:auditPage}[tab])()+'</div></div><nav class="nav" aria-label="Navigasi utama">'+pages.map(n=>'<button data-act="'+n+'" '+((tab===n||(tab==='history'&&n==='home'))?'class="active" aria-current="page"':'')+'>'+icon(n==='verify'?'shield':n==='audit'?'history':n)+titles[n]+'</button>').join('')+'</nav>';tick();updateRefreshIndicator();
+ app.innerHTML='<div class="shell"><header class="top"><img src="./assets/brand.png" alt=""><div><strong>Absensi Kehadiran Outsourcing</strong><small>Kabupaten Kotawaringin Timur</small></div><button aria-label="Status sinkronisasi" data-act="updates">'+icon('bell')+'</button></header><div id="page">'+refreshNotice()+({home:dashboard,history,calendar,doc:leave,user:profile,verify:verification,audit:auditPage}[tab])()+'</div></div><nav class="nav" aria-label="Navigasi utama">'+pages.map(n=>'<button data-act="'+n+'" '+((tab===n||(tab==='history'&&n==='home'))?'class="active" aria-current="page"':'')+'>'+icon(n==='verify'?'shield':n==='audit'?'history':n)+titles[n]+'</button>').join('')+'</nav>';tick();updateRefreshIndicator();
 }
 async function synchronize(manual=false){
  if(!session||session.mustChangePassword||synchronizing||!navigator.onLine)return;
@@ -308,6 +311,7 @@ async function synchronize(manual=false){
  updateRefreshIndicator(manual);
  try{
   if(s.role==='EMPLOYEE'){
+   await sendQueuedRequests(s,owner);
    for(const q of await owned('queue',owner)){
     if(session!==s||!navigator.onLine)return;
     if(q.confirmed||q.retired)continue;
@@ -331,6 +335,12 @@ async function synchronize(manual=false){
   if (session !== s) return;
   if (result.code !== 'REFRESH_READY' || !result.context) throw Error('Format pembaruan tidak valid.');
   applyContext(result.context);
+  if(result.apiVersion!=='2.0.0'||!result.requests)throw Error('Pembaruan ini memerlukan backend v2.0.0.');
+  requestData=result.requests;lateness=result.lateness;
+  if(requestedMonth===period&&navigator.onLine){
+    clearPreview();preview=result.mobileTestPreview||[];previewMonth=requestedMonth;
+    if(dialog.open&&dayReturn&&$('#panel .day-block'))showDay(dayReturn);
+  }
   if (s.role === 'VERIFIER') {
     if (!Array.isArray(result.queue?.items)) throw Error('Format antrean tidak valid.');
     if(withAudit){
@@ -345,14 +355,14 @@ async function synchronize(manual=false){
         !Array.isArray(status?.items)) throw Error('Format rekap harian server tidak valid.');
     const previous = await get('status',owner), months = {...(previous?.dailyMonths || {})};
     if(!Array.isArray(daily.calendar))throw Error('Backend Kalender Shift belum diperbarui ke v1.8.0.');
-    months[requestedMonth] = {scope190:true,items:daily.items,calendar:daily.calendar,transactions:status.items,at:Date.now()};
-    await put('status',{owner,scope190:true,todayRows:status.todayRows||[],items:status.items,at:Date.now(),dailyMonths:months});
+    months[requestedMonth] = {scope200:true,lateness:result.lateness,items:daily.items,calendar:daily.calendar,transactions:status.items,at:Date.now()};
+    await put('status',{owner,requests:result.requests,scope200:true,todayRows:status.todayRows||[],items:status.items,at:Date.now(),dailyMonths:months});
   }
   if (session !== s) return;
   refreshError = '';
   if(manual&&session===s)toast(s.role==='EMPLOYEE'&&queue.length?'Antrean belum tuntas. Buka detail untuk melihat alasannya.':'Data pusat diperbarui.');
  } catch(e) {
-   if (session === s) refreshError = describe(e);
+   if (session === s){clearPreview();if(s.role==='VERIFIER'){requestData=null;lateness=null;}refreshError = describe(e);}
    if (manual) report(e);
  } finally {
    synchronizing = false;
@@ -360,6 +370,20 @@ async function synchronize(manual=false){
      try { await local(); } catch(e) { refreshError = describe(e); }
      renderRefreshedData();
      updateRefreshIndicator();
+   }
+ }
+}
+async function sendQueuedRequests(s,owner){
+ for(const d of await owned('drafts',owner)){
+   if(d.status!=='QUEUED'||s!==session||!navigator.onLine)continue;
+   try{
+     const result=await api('REQUEST_SUBMIT',{payload:{id:d.id,kind:d.kind,day:d.day,end:d.end,reason:d.reason,adjustment:!!d.adjustment}});
+     if(result.code!=='REQUEST_SAVED'||result.item?.id!==d.id)throw Error('Tanda terima pengajuan belum valid.');
+     await put('drafts',{...d,...result.item,owner,issue:''});
+   }catch(e){
+     const definite=['REQUEST_OVERLAP','REQUEST_CONFLICT','INVALID_REQUEST'].includes(e.code);
+     await put('drafts',{...d,status:definite?'DRAFT':'QUEUED',issue:describe(e)});
+     if(e.code==='TRANSPORT'||s!==session)throw e;
    }
  }
 }
@@ -433,32 +457,37 @@ function auditPage(){
 }
 function reviewIntro(r){
  return '<p><b>'+esc(r.employeeName||r.employeeId)+' · '+esc(label(r.type))+'</b><br>Tanggal shift '+esc(fmtDay(r.shiftDate||r.localDate))+'</p>'+
-   (r.mobileTest?'<p><b>MODE UJI · GPS dan waktu simulasi</b></p>':'')+
+   (r.mobileTest?'<span class="test-mark">MODE UJI</span>':'')+
    (r.hasPhoto?'<div id="review-proof" role="status"></div>':'<small>Transaksi ini memakai alur presensi lama tanpa foto.</small>');
 }
 function openReview(title,r,body){
  reviewOpen=true;
  refreshScheduler.pause();
- modal(title,reviewIntro(r)+body);
+ modal(title,reviewIntro(r)+body);dialog.classList.add('review-modal');dialog.dataset.record=r.recordId;
  if(r.hasPhoto)loadProof(r.recordId);
 }
 async function loadProof(id){
  const target=$('#review-proof'),current=session;
  if(!target||target.getAttribute('aria-busy')==='true')return;
- const visible=()=>dialog.open&&target.isConnected&&session===current;
- target.setAttribute('aria-busy','true');target.textContent='Memuat foto bukti…';
+ const visible=()=>dialog.open&&target.isConnected&&session===current&&dialog.dataset.record===id;
+ target.setAttribute('aria-live','polite');target.setAttribute('aria-busy','true');
+ target.innerHTML='<div class="photo-loader"><i aria-hidden="true"></i>Memuat foto bukti…</div>';
+ let timeout;
  try{
-   const r=await api('REVIEW_PHOTO',{payload:{recordId:id}});
-   if(!visible())return;
-   if(r.code!=='PHOTO_READY'||!r.jpeg)throw Error('Data foto belum tersedia.');
-   const img=new Image();img.className='review-image';img.alt='Foto bukti presensi';
-   img.src='data:image/jpeg;base64,'+r.jpeg;
-   await img.decode();
-   if(visible())target.replaceChildren(img,document.createTextNode((r.mobileTest?'GPS simulasi ':'GPS ')+r.location+' · ±'+r.accuracy+' m'));
+   const fetchPhoto=async()=>{
+     const r=await api('REVIEW_PHOTO',{payload:{recordId:id}});
+     if(!visible())return null;
+     if(r.code!=='PHOTO_READY'||r.recordId!==id||!r.jpeg)throw Error('Foto transaksi belum tersedia.');
+     const img=new Image();img.className='review-image';img.alt='Foto bukti presensi';
+     img.src='data:image/jpeg;base64,'+r.jpeg;await img.decode();return {r,img};
+   };
+   const proof=await Promise.race([fetchPhoto(),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Error('Foto belum selesai dimuat. Periksa koneksi lalu coba lagi.')),35000);})]);
+   if(visible()&&proof){const {r,img}=proof;target.replaceChildren(img,document.createTextNode((r.mobileTest?'GPS simulasi ':'GPS ')+r.location+' · ±'+r.accuracy+' m'));}
  }catch(error){
    if(visible())target.innerHTML=msg(describe(error))+btn('proof:'+esc(id),'Muat ulang foto','secondary','refresh');
- }finally{target.removeAttribute('aria-busy');}
+ }finally{clearTimeout(timeout);target.removeAttribute('aria-busy');}
 }
+
 function decisionForm(r,opposite=''){
  const choices=opposite?[opposite]:['VERIFIED','REJECTED','NEEDS_CORRECTION'];
  const reject=opposite==='REJECTED';
@@ -519,9 +548,7 @@ async function commitVerifierDecision(request,mayRepair=true) {
     throw Error('Hasil verifikasi belum dapat dipastikan. Jangan mengirim ulang sebelum memeriksa Verification_Log dan Status_View.');
   }
 }
-function showDraft(){
- modal('Ajukan izin','<p>Draf ini hanya tersimpan di perangkat. Sampaikan permohonan kepada pengelola melalui jalur yang berlaku.</p><form id="draft"><label class="formlabel">Jenis permohonan<select name="kind"><option>Izin sakit</option><option>Cuti tahunan</option><option>Izin mendadak</option></select></label><label class="formlabel">Tanggal<input class="control" type="date" name="day" required></label><label class="formlabel">Alasan<textarea rows="3" name="reason" required maxlength="500"></textarea></label><button class="primary full">Simpan draf</button></form>');
-}
+function showDraft(kind='LEAVE',d={}){modal(requestNames[kind],requestForm(kind,d,dateKey(now())));}
 function details(r){
  const shift=r.shiftDate,day=shift&&dailyRows.find(d=>d.workDate===dateISO(shift));
  modal('Detail '+label(r.type),line('Tanggal shift',r.shiftDate?esc(fmtDay(shift)):'Belum tersedia')+
@@ -533,17 +560,27 @@ function details(r){
    (r.latitude!==undefined&&r.latitude!==''?line('Koordinat',esc(r.latitude)+', '+esc(r.longitude))+line('Akurasi GPS','±'+esc(r.accuracy)+' m'):'')+
    '<small class="mono">'+esc(r.recordId)+'</small>'+(dayReturn?btn('day:'+dayReturn,'Kembali ke detail harian','secondary full'):''));
 }
+async function decideRequest(id,route,data){
+ const current=session,r=requestItems().find(x=>x.id===id);
+ if(!r||!navigator.onLine)throw Error('Hubungkan internet untuk menyimpan keputusan.');
+ const result=await api(route,{payload:{id,kind:r.kind,...data}});
+ if(current!==session)return;
+ if(result.code!=='REQUEST_SAVED'||result.item?.id!==id)throw Error('Tanda terima tidak sesuai.');
+ if(requestData)requestData.items=requestData.items.map(x=>x.id===id?result.item:x);
+ if(current.role==='EMPLOYEE')await put('drafts',{...result.item,owner:own()});
+ dialog.close();render();toast('Status permohonan diperbarui.');await scheduleSync(true,true);
+}
 async function act(a){
  const [key,arg]=a.split(':');
  if(['home','history','calendar','doc','user','verify','audit'].includes(key)){const entering=tab!==key;category='';filter='Semua';dayReturn='';tab=key;render();window.scrollTo(0,0);if(entering&&['history','calendar','verify','audit'].includes(key))scheduleSync(true);return}
  switch(key){
  case 'eye':{const p=$('[name=password]');p.type=p.type==='password'?'text':'password';$('[data-act=eye]').setAttribute('aria-label',p.type==='text'?'Sembunyikan password':'Tampilkan password');break}
- case 'forgot':modal('Lupa password?','<p>Hubungi operator Kecamatan Mentaya Hilir Selatan untuk verifikasi identitas dan pengaturan ulang password akun.</p>');break;
+ case 'forgot':modal('Lupa password?','<p>Hubungi operator Kabupaten Kotawaringin Timur untuk verifikasi identitas dan pengaturan ulang password akun.</p>');break;
  case 'sync':await refreshScheduler.refresh(true);break;
  case 'category':category=arg;tab='history';dayReturn='';filter='Semua';render();window.scrollTo(0,0);scheduleSync(true);break;
  case 'monthMove':{
    const d=new Date(period+'-15T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+Number(arg));
-   period=d.toISOString().slice(0,7);await local();render();scheduleSync(true);break;
+   clearPreview();period=d.toISOString().slice(0,7);await local();render();scheduleSync(true);break;
  }
  case 'day':showDay(arg);break;
  case 'proof':await loadProof(arg);break;
@@ -558,11 +595,14 @@ async function act(a){
      '<small class="mono">'+esc(q.id)+'</small>');break;
  }
  case 'newdraft':showDraft();break;
- case 'draftlist':modal('Riwayat izin',drafts.length?drafts.map(d=>line(esc(d.kind),esc(fmtDay(d.day)))).join(''):empty('Belum ada draf izin.'));break;
- case 'draft':{const d=drafts.find(x=>x.id===arg);if(d)modal(d.kind,line('Tanggal',esc(fmtDay(d.day)))+'<p>'+esc(d.reason)+'</p>'+chip('Draf lokal','yellow')+' '+btn('deleteDraft:'+arg,'Hapus draf','danger'));break}
- case 'deleteDraft':await remove('drafts',arg);await local();dialog.close();render();break;
- case 'rules':modal('Ketentuan izin','<p>Hubungi pengelola untuk kuota dan persetujuan izin. API pilot belum menyediakan saldo cuti atau pengiriman permohonan.</p>');break;
- case 'incident':modal('Laporan insiden','<p>Laporkan insiden langsung kepada pengelola. Gateway pilot belum menerima laporan insiden.</p>');break;
+ case 'incident':showDraft('INCIDENT');break;
+ case 'request':{const r=requestItems().find(x=>x.id===decodeURIComponent(arg));if(r)modal(requestNames[r.kind],requestDetail(r,requestData?.reviewer===true));break;}
+ case 'editRequest':{const r=drafts.map(normalizeDraft).find(x=>x.id===decodeURIComponent(arg)&&x.status==='DRAFT');if(r)showDraft(r.kind,r);break;}
+ case 'deleteDraft':{const id=decodeURIComponent(arg);if(!drafts.some(x=>x.id===id&&(!x.status||x.status==='DRAFT')))break;
+   await remove('drafts',id);await local();dialog.close();render();break;}
+ case 'cancelRequest':{const r=requestItems().find(x=>x.id===decodeURIComponent(arg));if(r)modal('Batalkan permohonan?',line('Tanggal',esc(r.day))+btn('confirmCancel:'+arg,'Ya, batalkan','danger'));break;}
+ case 'confirmCancel':await decideRequest(decodeURIComponent(arg),'REQUEST_CANCEL',{});break;
+ case 'resendRequest':dialog.close();await scheduleSync(true,true);break;
  case 'updates':modal('Status sinkronisasi','<p>'+esc(session.role==='VERIFIER'?'Antrean verifikasi diperbarui saat aplikasi aktif.':queue.length+' transaksi lokal menunggu sinkronisasi.')+'</p>'+btn('sync','Perbarui dari server','primary','refresh'));break;
  case 'account':modal('Informasi akun',line('Identitas',esc(session.employeeId))+line('Username',esc(session.username))+line('Nama',esc(session.name||'—'))+line('Profesi',esc(session.profession||'—'))+line('Unit',esc(session.unit||'—')));break;
  case 'schedule':modal('Jadwal kerja','<p>Referensi terakhir yang dikembalikan validator jadwal.</p>'+actNames.map(x=>{const r=session.shifts?.[x];return line(label(x),r?.scheduleId?esc([r.shiftDate,r.shiftCode,r.scheduleId].filter(Boolean).join(' · ')):'Belum tersedia')}).join(''));break;
@@ -587,7 +627,7 @@ async function act(a){
  case 'probe':await probe();modal('Uji koneksi API','<p>✓ GET health terbaca.</p><p>✓ POST tanpa token menghasilkan SESSION_REQUIRED.</p><p>Transport siap diuji dengan akun pilot.</p>');break;
  case 'install':if(installEvent){await installEvent.prompt();installEvent=null}else toast('Buka menu browser → Instal aplikasi / Tambahkan ke layar utama.');break;
  case 'password':modal('Ubah password',passwordForm());break;
- case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kecamatan Mentaya Hilir Selatan</p><p>Pilot PWA 1.9.0</p>');break;
+ case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.0.0</p>');break;
  case 'help':modal('Bantuan & panduan','<p>Masuk saat online untuk memuat jadwal. Izinkan kamera dan GPS, kunci lokasi, lalu selesaikan tiga tantangan. Tinjau foto dan kirim dalam lima menit.</p><p>Buka tab Shift untuk detail harian atau tekan warna di Ringkasan Status untuk melihat riwayat.</p>');break;
  case 'logout':modal('Keluar dari aplikasi?','<p>Foto presensi yang belum dikirim akan dihapus saat perekaman ditutup.</p>'+btn('confirmLogout','Keluar','danger'));break;
  case 'confirmLogout':{let revoked=false;try{if(navigator.onLine){await api('LOGOUT');revoked=true}}finally{clearSession();toast(revoked?'Anda telah keluar.':'Sesi lokal ditutup. Sesi server berakhir sesuai masa berlakunya.')}break}
@@ -608,7 +648,7 @@ document.addEventListener('change',e=>{
  const hide=e.target.value!=='VERIFIED',required=hide||!!e.target.form.dataset.base;$('#colorlabel').hidden=hide;const notes=e.target.form.elements.notes;notes.required=required;notes.minLength=required?5:0;
 }});
 document.addEventListener('submit',async e=>{
- e.preventDefault();const f=e.target, input=Object.fromEntries(new FormData(f)), b=f.querySelector('button:not([type=button])');
+ e.preventDefault();const f=e.target, input=Object.fromEntries(new FormData(f)), b=e.submitter||f.querySelector('button:not([type=button])');
  if(!b||b.disabled)return;b.disabled=true;const initial=b.textContent;b.textContent=f.id==='login'?'Memeriksa akun…':'Memproses…';
  try{
   switch(f.id){
@@ -657,8 +697,19 @@ document.addEventListener('submit',async e=>{
     if(request.baseDecisionId)audit=null;
     render();await scheduleSync(true,true);break;
   }
-  case 'month':period=input.month;dialog.close();await local();render();scheduleSync(true);break;
-  case 'draft':if(!input.reason.trim())throw Error('Isi alasan permohonan.');await put('drafts',{id:crypto.randomUUID(),owner:own(),at:Date.now(),kind:input.kind,day:input.day,reason:input.reason.trim()});await local();dialog.close();render();toast('Draf izin tersimpan di perangkat.');break;
+  case 'month':clearPreview();period=input.month;dialog.close();await local();render();scheduleSync(true);break;
+  case 'request-decision':await decideRequest(decodeURIComponent(f.dataset.id),'REQUEST_DECIDE',input);break;
+  case 'request-form':{
+    const s=session,owner=own(),kind=f.dataset.kind,reason=input.reason.trim(),end=kind==='LEAVE'?input.end:input.day;
+    if(!reason||end<input.day)throw Error('Periksa uraian dan urutan tanggal.');
+    const send=e.submitter?.value==='send',id=f.dataset.id||crypto.randomUUID();
+    f.dataset.id=id;
+    await put('drafts',{id,owner,kind,day:input.day,end,reason,adjustment:input.adjustment==='on',at:Date.now(),status:send?'QUEUED':'DRAFT'});
+    if(session!==s)break;
+    await local();dialog.close();tab='doc';render();
+    toast(send?'Pengajuan masuk antrean pengiriman.':'Draf tersimpan di perangkat.');
+    if(send&&navigator.onLine)await scheduleSync(true,true);break;
+  }
   }
  }catch(err){report(err)}finally{b.disabled=false;b.textContent=initial}
 });
@@ -669,7 +720,7 @@ window.addEventListener('online', () => {
   if (session) scheduleSync(wasOffline, false);
 });
 window.addEventListener('offline', () => {
-  foregroundOffline = true;
+  foregroundOffline = true;clearPreview();renderRefreshedData();
   refreshScheduler.pause();
   updateRefreshIndicator();
 });
@@ -680,6 +731,7 @@ document.addEventListener('visibilitychange', () => {
 });
 dialog.addEventListener('cancel',e=>{if(deciding)e.preventDefault();});
 dialog.addEventListener('close', () => {
+  if(!dialog.open){dialog.classList.remove('review-modal');delete dialog.dataset.record;}
   if(!dialog.open&&reviewOpen){reviewOpen=false;scheduleSync();}
   if (!dialog.open){const proof=$('#review-proof');if(proof)proof.replaceChildren();}
   if (refreshDeferred) renderRefreshedData();
