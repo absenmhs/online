@@ -169,10 +169,10 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   function updateClock(){
     if(!current()||!expiresPerf)return;
     if(phase==='receiptPending')submit.disabled=!navigator.onLine;
-    if(phase!=='review'){
-      if(image&&remaining()<=0)forget();
-      return;
-    }
+    // The evidence countdown owns expiration only while the user is reviewing
+    // the photo. Once sending starts, the write/receipt outcome owns cleanup:
+    // do not discard the preview during sending, checking, or receiptPending.
+    if(phase!=='review')return;
     const left=Math.ceil(remaining()/1000);
     if(left<=0){fail('Bukti kedaluwarsa. Rekam ulang untuk mengirim presensi.');return;}
     clock.textContent='Bukti berlaku '+Math.floor(left/60)+':'+String(left%60).padStart(2,'0');
