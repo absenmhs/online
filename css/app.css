@@ -1054,3 +1054,74 @@ dialog.recording{
 /* All four verifier tabs have equal tappable surface and readable labels. */
 .nav button { min-width:0; min-height:53px; font-size:clamp(11.5px,3.3vw,13px); }
 .nav .icon { font-size:20px; }
+
+
+/* v2.3.0 HF2 — Izin & Insiden: satu baris, prioritas visual jelas. */
+.request-entry-actions {
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:9px;
+  align-items:stretch;
+}
+.request-entry-actions .request-entry-button {
+  display:inline-flex;
+  flex-wrap:nowrap;
+  align-items:center;
+  justify-content:center;
+  min-width:0;
+  min-height:58px;
+  width:100%;
+  margin:0;
+  padding:11px clamp(4px,1.8vw,10px);
+  gap:clamp(3px,1vw,7px);
+  font-size:clamp(11.5px,3.18vw,14px);
+  font-weight:750;
+  letter-spacing:-.2px;
+  line-height:1.15;
+  white-space:nowrap;
+  text-align:center;
+}
+.request-entry-actions .request-entry-button .icon {
+  width:1.1em;
+  height:1.1em;
+  flex:0 0 auto;
+}
+/* Uses the same danger palette as Log Out; red frame for a serious incident. */
+.request-entry-actions .request-incident-button {
+  background:linear-gradient(135deg,#fff4f4,#ffe5e7);
+  color:#a62636;
+  border:1.5px solid #d97e8b;
+  box-shadow:0 2px 7px #b43b4220;
+}
+.request-entry-actions .request-incident-button:hover {
+  background:linear-gradient(135deg,#fff0f0,#ffdbdf);
+}
+/* Preserve request form handlers; make the primary action unmistakable. */
+@media(max-width:350px) {
+  .request-entry-actions { grid-template-columns:minmax(0,1fr); }
+  .request-entry-actions .request-entry-button { font-size:15px; }
+}
+#request-form .request-form-actions {
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:9px;
+  margin:17px 0 4px;
+}
+#request-form .request-form-actions button {
+  min-width:0;
+  min-height:48px;
+  width:100%;
+  padding:11px 13px;
+  line-height:1.2;
+  white-space:nowrap;
+  font-size:clamp(14px,3.8vw,16px);
+}
+#request-form .request-form-actions .secondary {
+  background:#e7f2fd;
+  color:#0759a5;
+  margin:0;
+}
+#dialog:has(#request-form) #close {
+  min-height:42px;
+  padding:9px 15px;
+  margin-top:11px;
+}

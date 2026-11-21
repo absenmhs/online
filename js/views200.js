@@ -31,7 +31,7 @@ export function leavePage({data,items,day,registered,fmtDay}){
     '<small>Izin Bulan Ini</small><b>'+(data?.month===day.slice(0,7)?esc(data.approvedDays)+' hari':'—')+'</b>'+
     '<small>'+esc(fmtDay(day,{month:'long',year:'numeric'}))+'</small></div><div><small>Terdaftar Sejak</small><b>'+
     esc(accountAge(registered,day)||'Belum tersedia')+'</b><small>'+esc(registered?fmtDay(registered):'')+'</small></div></section>'+
-    '<div class="two">'+btn('newdraft',requestNames.LEAVE,'primary','doc')+btn('incident',requestNames.INCIDENT,'secondary','shield')+'</div>'+
+    '<div class="two request-entry-actions">'+btn('newdraft',requestNames.LEAVE,'primary request-entry-button','doc')+btn('incident',requestNames.INCIDENT,'danger request-entry-button request-incident-button','shield')+'</div>'+
     card('Riwayat permohonan',requestList(items));
 }
 export function requestForm(kind,d={},today,test=false){
@@ -41,7 +41,7 @@ export function requestForm(kind,d={},today,test=false){
     (incident?'':'<label class="formlabel">Sampai tanggal<input class="control" required type="date" name="end" value="'+esc(d.end||d.day||today)+'"></label>')+
     '<label class="formlabel">'+(incident?'Uraian kejadian':'Alasan izin')+'<textarea class="control" rows="3" required maxlength="500" name="reason">'+
     esc(d.reason||'')+'</textarea></label>'+(incident?'<p>'+ (test?'MODE UJI · Laporan ini hanya untuk simulasi.':'Setelah insiden disetujui, kode jadwal tanggal tersebut menjadi I.')+'</p>':'')+
-    '<div class="two"><button class="secondary" type="submit" value="draft">Simpan draf</button><button class="primary" type="submit" value="send">Kirim pengajuan</button></div></form>';
+    '<div class="request-form-actions"><button class="primary" type="submit" value="send">Kirim Pengajuan</button><button class="secondary" type="submit" value="draft">Simpan Draf</button></div></form>';
 }
 export function requestDetail(r,review){
   const id=esc(encodeURIComponent(r.id)),pending=r.status==='PENDING';
