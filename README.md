@@ -1,6 +1,6 @@
 # Absensi Kehadiran Outsourcing
 
-Kabupaten Kotawaringin Timur · Pilot v2.1.0
+Kabupaten Kotawaringin Timur · Pilot v2.2.0
 
 Frontend statis untuk GitHub Pages. Publikasikan dari folder yang berisi `index.html`, `.nojekyll`, `sw.js`, `manifest.webmanifest`, `assets/`, `css/` dan `js/`. Folder ini berisi seluruh frontend untuk dipublikasikan. Konfigurasi deployment berada di `js/config.js`.
 
@@ -12,4 +12,4 @@ Frontend statis untuk GitHub Pages. Publikasikan dari folder yang berisi `index.
 - MODE UJI tampil pada bagian terpisah saat server mengizinkan akun. Buka Perbarui untuk membaca perubahan. Ringkasan harian dan grafik menggunakan transaksi resmi.
 - Saat pembaruan versi, buka kembali PWA ketika online. Cache baru memuat shell dan ikon. Antrean, draf, preferensi, dan foto profil menggunakan penyimpanan perangkat yang sudah ada.
 
-Pada akun penguji, buka Profil → Pengaturan Aplikasi → Reset Mobile Test untuk memulai sesi baru. Langkah pengaturan server dan rekonsiliasi jadwal ada di PANDUAN_2.1.md pada folder utama paket.
+Pada akun penguji, buka Profil → Pengaturan Aplikasi → Reset Mobile Test untuk memulai sesi baru. Panduan hotfix tersedia di PANDUAN_2.2.md pada folder utama paket.

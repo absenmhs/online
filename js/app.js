@@ -314,12 +314,14 @@ async function synchronize(manual=false){
    await sendQueuedRequests(s,owner);
    for(const q of await owned('queue',owner)){
     if(session!==s||!navigator.onLine)return;
+    if(capturing)break;
     if(q.confirmed||q.retired)continue;
     // Sampai v1.7.1 queue dapat berisi payload lama. Hanya tanyakan tanda terimanya.
     let response;
     try{response=await api('RECEIPT',{payload:{submissionId:q.id}});}
     catch(e){if(e.code==='TRANSPORT'||session!==s)throw e;continue;}
     if(session!==s)return;
+    if(capturing)break;
     if(response.recordId){
       await put('queue',receiptRow(q,response));
     }else if(response.code==='RECEIPT_NOT_FOUND' && (!q.v180 || Date.now()-q.at>600000)){
@@ -335,7 +337,7 @@ async function synchronize(manual=false){
   if (session !== s) return;
   if (result.code !== 'REFRESH_READY' || !result.context) throw Error('Format pembaruan tidak valid.');
   applyContext(result.context);
-  if(result.apiVersion!=='2.1.0'||!result.requests)throw Error('Pembaruan ini memerlukan backend v2.1.0.');
+  if(!['2.1.0','2.2.0'].includes(result.apiVersion)||!result.requests)throw Error('Perbarui backend ke v2.2.0.');
   requestData=result.requests;lateness=result.lateness;
   if(requestedMonth===period&&navigator.onLine){
     clearPreview();preview=result.mobileTestPreview||[];previewMonth=requestedMonth;
@@ -418,24 +420,43 @@ async function capture(action){
  try{
   let again;
   do{
+   let pendingRow,previousWriteUncertain=false;
+   async function rememberReceipt(r){
+     // The pending UUID is already durable. A later sync can repair the cache.
+     try{await put('queue',receiptRow(pendingRow,r));}catch{}
+     return r;
+   }
    again=await recordAttendance({dialog,title:label(action),type:action,call:api,describe,
     alive:()=>session===s&&valid(),onDisabled:()=>{if(session===s){s.writeOpen=false;saveSession();}},
     onAccepted:r=>toast(r.mobileTest?'MODE UJI: transaksi simulasi diterima. Tidak masuk rekap kehadiran.':
       r.needsStatusRepair?'Diterima server. Status sedang diselaraskan.':'Presensi diterima server. Menunggu verifikasi.'),
     send:async (data,maySend)=>{
-      const q={id:data.id,owner,at:data.at,shiftDate:data.shiftDate,testRunId:data.testRunId,action,v180:true,issue:'Menunggu konfirmasi penerimaan'};
-      await put('queue',q);
-      if(!maySend())throw Object.assign(Error('Perekaman berakhir.'),{code:'EVIDENCE_EXPIRED'});
+      if(!pendingRow){
+        pendingRow={id:data.id,owner,at:data.at,shiftDate:data.shiftDate,testRunId:data.testRunId,action,v180:true,issue:'Menunggu konfirmasi penerimaan'};
+        await put('queue',pendingRow);
+      }
       let r;
-      try{r=await api(action,{payload:{submissionId:q.id,shiftDate:data.shiftDate,scheduleId:data.scheduleId,photo:data.photo}});}
-      catch(e){
-        if(!['TRANSPORT','SERVICE_ERROR','LOCK_BUSY_RETRY','RAW_COMMIT_UNCERTAIN_RETRY_SAME_UUID','GET_NOT_AVAILABLE','STATUS_SYNC_CONFLICT','SERVICE_INVALID_RESPONSE'].includes(e.code))
-          await put('queue',{...q,retired:true,retiredAt:Date.now(),issue:describe(e)});
+      try{
+        if(!maySend())throw Object.assign(Error('Perekaman berakhir.'),{code:'EVIDENCE_EXPIRED'});
+        r=await api(action,{payload:{submissionId:pendingRow.id,shiftDate:data.shiftDate,scheduleId:data.scheduleId,photo:data.photo}});
+        if(!r.recordId||!['RECORDED_PENDING','ALREADY_ACCEPTED','RECORDED_STATUS_SYNC_PENDING','ALREADY_ACCEPTED_STATUS_PENDING'].includes(r.code))
+          throw Object.assign(Error('Tanda terima server belum pasti.'),{code:'SERVICE_INVALID_RESPONSE'});
+      }catch(e){
+        if(['TRANSPORT','SERVICE_ERROR','LOCK_BUSY_RETRY','RAW_COMMIT_UNCERTAIN_RETRY_SAME_UUID','GET_NOT_AVAILABLE','STATUS_SYNC_CONFLICT','SERVICE_INVALID_RESPONSE'].includes(e.code)){
+          previousWriteUncertain=true;
+          throw Object.assign(Error('Periksa tanda terima transaksi.'),{code:'RECEIPT_REQUIRED'});
+        }
+        if(!previousWriteUncertain)await put('queue',{...pendingRow,retired:true,retiredAt:Date.now(),issue:describe(e)});
         throw e;
       }
-      if(!r.recordId||!['RECORDED_PENDING','ALREADY_ACCEPTED','RECORDED_STATUS_SYNC_PENDING','ALREADY_ACCEPTED_STATUS_PENDING'].includes(r.code))
-        throw Object.assign(Error('Tanda terima server belum pasti.'),{code:'TRANSPORT'});
-      await put('queue',receiptRow(q,r));return r;
+      return rememberReceipt(r);
+    },
+    checkReceipt:async id=>{
+      const r=await api('RECEIPT',{payload:{submissionId:id}});
+      if(r.code==='RECEIPT_NOT_FOUND')return null;
+      if(!r.recordId||!['ALREADY_ACCEPTED','ALREADY_ACCEPTED_STATUS_PENDING'].includes(r.code))
+        throw Error('Respons tanda terima belum lengkap.');
+      return rememberReceipt(r);
     }});
   }while(again&&s===session&&valid()&&s.writeOpen!==false);
  }finally{capturing=false;if(s===session){await local();render();scheduleSync(true,true);}}
@@ -451,13 +472,18 @@ function auditPage(){
    people.map(p=>'<option value="'+esc(p.employeeId)+'" '+(p.employeeId===auditEmployee?'selected':'')+'>'+
      esc(p.name+' · '+p.employeeId)+'</option>').join('')+'</select></label>'+
    (items.map(r=>'<button class="card entry" data-act="auditRecord:'+esc(r.recordId)+'">'+icon('history')+
-     '<span><b>'+esc(r.employeeName||r.employeeId)+'</b><small>'+esc(label(r.type)+' · '+r.decisions[0].at)+
+     '<span><b>'+esc(r.employeeName||r.employeeId)+'</b><small>'+esc(label(r.type)+' · Keputusan '+r.decisions[0].at+' WIB')+
      (r.mobileTest?' · MODE UJI'+(r.testRunId?' · Sesi '+esc(r.testRunId.slice(0,8)):''):'')+'</small></span>'+chip(label(r.verificationStatus),r.verificationStatus==='VERIFIED'?'green':'yellow')+'</button>').join('')||
      empty(!audit?(navigator.onLine?'Menunggu data riwayat verifikasi.':'Hubungkan internet untuk memuat riwayat verifikasi.'):'Belum ada keputusan dalam tujuh hari ini.'));
 }
 function reviewIntro(r){
- return '<p><b>'+esc(r.employeeName||r.employeeId)+' · '+esc(label(r.type))+'</b><br>Tanggal shift '+esc(fmtDay(r.shiftDate||r.localDate))+'</p>'+
-   (r.mobileTest?'<span class="test-mark">MODE UJI</span>':'')+
+ const captureTime=r.localTime?esc(r.localTime)+' WIB':'Belum tersedia';
+ const otherDay=r.localDate&&r.shiftDate&&dateISO(r.localDate)!==dateISO(r.shiftDate);
+ return '<p><b>'+esc(r.employeeName||r.employeeId)+' · '+esc(label(r.type))+'</b></p>'+
+   line('Tanggal shift',esc(fmtDay(r.shiftDate)||'Belum tersedia'))+
+   line('Waktu presensi',captureTime+(otherDay?' · '+esc(fmtDay(r.localDate)):''))+
+   (r.receivedTime?line('Waktu diterima server',esc(r.receivedTime)+' WIB'):'')+
+   (r.mobileTest?'<span class="test-mark">MODE UJI'+(r.testRunId?' · Sesi '+esc(r.testRunId.slice(0,8)):'')+'</span>':'')+
    (r.hasPhoto?'<div id="review-proof" role="status"></div>':'<small>Transaksi ini memakai alur presensi lama tanpa foto.</small>');
 }
 function openReview(title,r,body){
@@ -511,7 +537,7 @@ function showAudit(id){
  if(!decisions.length){render();return;}
  const timeline='<h3>Catatan keputusan</h3>'+decisions.map(d=>'<section class="audit-log"><b>'+
    esc((d.correction?'Koreksi · ':'')+label(d.decision)+(d.color?' · '+d.color:''))+'</b><small>'+
-   esc(d.actor+' · '+d.at+' WIB')+'</small>'+(d.notes?'<p>'+esc(d.notes)+'</p>':'')+'</section>').join('');
+   esc(d.actor+' · Waktu keputusan '+d.at+' WIB')+'</small>'+(d.notes?'<p>'+esc(d.notes)+'</p>':'')+'</section>').join('');
  const amend=r.correctable?decisionForm(r,r.verificationStatus==='VERIFIED'?'REJECTED':'VERIFIED'):
    !r.synchronized?msg('Keputusan log dan Status_View perlu diselaraskan.')+(r.repairBaseId?
      '<form id="repair" data-id="'+esc(id)+'"><button class="secondary full">Selaraskan keputusan tersimpan</button></form>':''):'';
@@ -659,7 +685,7 @@ async function act(a){
  case 'probe':await probe();modal('Uji koneksi API','<p>✓ GET health terbaca.</p><p>✓ POST tanpa token menghasilkan SESSION_REQUIRED.</p><p>Transport siap diuji dengan akun pilot.</p>');break;
  case 'install':if(installEvent){await installEvent.prompt();installEvent=null}else toast('Buka menu browser → Instal aplikasi / Tambahkan ke layar utama.');break;
  case 'password':modal('Ubah password',passwordForm());break;
- case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.1.0</p>');break;
+ case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.2.0</p>');break;
  case 'help':modal('Bantuan & panduan','<p>Masuk saat online untuk memuat jadwal. Izinkan kamera dan GPS, kunci lokasi, lalu selesaikan tiga tantangan. Tinjau foto dan kirim dalam lima menit.</p><p>Buka tab Shift untuk detail harian atau tekan warna di Ringkasan Status untuk melihat riwayat.</p>');break;
  case 'logout':modal('Keluar dari aplikasi?','<p>Foto presensi yang belum dikirim akan dihapus saat perekaman ditutup.</p>'+btn('confirmLogout','Keluar','danger'));break;
  case 'confirmLogout':{let revoked=false;try{if(navigator.onLine){await api('LOGOUT');revoked=true}}finally{clearSession();toast(revoked?'Anda telah keluar.':'Sesi lokal ditutup. Sesi server berakhir sesuai masa berlakunya.')}break}
