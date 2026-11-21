@@ -23,16 +23,27 @@ function cameraError(e){
 }
 export async function recordAttendance({dialog,title,type,call,send,checkReceipt,alive,describe,onAccepted,onDisabled}){
   const panel=dialog.querySelector('#panel');
-  panel.innerHTML='<h2></h2><section class="capture"><div class="camera-box"><video muted autoplay playsinline></video><img class="proof-preview" alt="Foto presensi untuk ditinjau" hidden></div>'+
-    '<div class="mobile-test-banner" role="status" hidden style="padding:10px;background:#fff0c2;border:1px solid #d49e19;border-radius:8px;color:#5b4000;font-weight:bold"></div>'+
-    '<div class="capture-status" role="status"></div><div class="capture-geo"><b class="office-name"></b><div class="office-map" aria-label="Peta kantor dan perangkat"></div>'+
-    '<small class="map-key">● Kantor dan radius &nbsp; <b>● Perangkat</b></small><p class="fix"></p></div>'+
+  panel.innerHTML='<section class="capture" data-view="location"><div class="camera-box"><video muted autoplay playsinline></video>'+
+    '<img class="proof-preview" alt="Foto presensi untuk ditinjau" hidden></div><header class="camera-header"><h2 id="capture-title"></h2>'+
+    '<small class="mobile-test-banner" hidden></small></header><div class="face-guide" aria-hidden="true"></div>'+
+    '<div class="capture-dock"><div class="capture-geo"><b class="office-name">Lokasi presensi</b>'+
+    '<div class="office-map" aria-label="Peta kantor dan perangkat"></div><small class="map-key">● Kantor dan radius &nbsp; <b>● Perangkat</b></small><p class="fix"></p></div>'+
+    '<ol class="challenge-list" aria-label="Tiga tantangan wajah" hidden></ol><div class="capture-status" role="status"></div>'+
     '<p class="countdown" hidden></p><div class="capture-actions"><button class="primary" data-c="lock" disabled>Kunci Lokasi</button>'+
-    '<button class="primary" data-c="send" hidden>Kirim Presensi</button><button class="secondary" data-c="retake" hidden>Ambil Ulang Foto</button></div></section>';
+    '<button class="primary" data-c="send" hidden>Kirim Presensi</button><button class="secondary" data-c="retake" hidden>Ambil Ulang Foto</button></div></div></section>';
   panel.querySelector('h2').textContent=title;
-  dialog.classList.add('recording');if(!dialog.open)dialog.showModal();
+  dialog.classList.add('recording');dialog.setAttribute('aria-labelledby','capture-title');
+  if(!dialog.open)dialog.showModal();
   const $=s=>panel.querySelector(s),video=$('video'),photo=$('.proof-preview'),status=$('.capture-status'),geo=$('.capture-geo'),
     clock=$('.countdown'),fixText=$('.fix'),map=$('.office-map'),banner=$('.mobile-test-banner'),lock=$('[data-c=lock]'),submit=$('[data-c=send]'),retake=$('[data-c=retake]');
+  const capture=$('.capture'),list=$('.challenge-list');
+  function highlight(index){
+    Array.from(list.children).forEach((el,i)=>{
+      el.dataset.step=i<index?'done':i===index?'current':'next';
+      if(i===index)el.setAttribute('aria-current','step');else el.removeAttribute('aria-current');
+      el.firstChild.textContent=i<index?'✓':String(i+1);
+    });
+  }
   const abort=new AbortController(),events={signal:abort.signal};
   let phase='setup',stream,model,watch=null,frame=0,pulse=null,office,info,fix,lockState,image='',steps=[],digest='',
     frontReady=false,infoAt=0,expiresPerf=0,expiresWall=0,disposed=false,challengeEnd=0;
@@ -63,11 +74,11 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   let finish;
   const closed=new Promise(resolve=>{finish=resolve;});
   function dispose(){
-    if(disposed)return;disposed=true;closeButton.disabled=false;halt();forget();clearInterval(pulse);abort.abort();dialog.classList.remove('recording');finish();
+    if(disposed)return;disposed=true;closeButton.disabled=false;halt();forget();clearInterval(pulse);abort.abort();dialog.classList.remove('recording');dialog.removeAttribute('aria-labelledby');finish();
   }
   function fail(message){
     if(!current())return;
-    phase='failed';status.classList.remove('capture-working');halt();forget();video.hidden=true;geo.hidden=true;clock.hidden=true;
+    phase='failed';capture.dataset.view='failed';list.hidden=true;status.classList.remove('capture-working');halt();forget();video.hidden=true;geo.hidden=true;clock.hidden=true;
     closeButton.disabled=retake.disabled=false;lock.hidden=submit.hidden=true;retake.hidden=false;retake.textContent='Rekam ulang';status.textContent=message;
   }
   function handleError(e){
@@ -95,7 +106,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     infoAt=performance.now();office=info.office;$('.office-name').textContent=office.name;
     banner.hidden=info.mobileTest!==true;
     if(info.mobileTest){
-      banner.textContent=info.testRunId?'Uji developer · sesi '+info.testRunId.slice(0,8)+' · Jadwal virtual dan GPS simulasi. Selesaikan tiga tantangan kamera.':'Mobile Test · GPS simulasi. Jam presensi mengikuti jadwal kerja.';
+      banner.textContent='MODE UJI · GPS simulasi'+(info.testRunId?' · '+info.testRunId.slice(0,8):'');
       if(!info.testFix)throw Error('Pembaruan kamera memerlukan backend 2.1.0.');
       fix={...info.testFix,at:Date.now()};
       fixText.textContent='GPS SIMULASI (bukan lokasi ponsel)';
@@ -142,7 +153,12 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     if(!current()||phase!=='locking')return;
     lockState=reply;challengeEnd=performance.now()+reply.challengeEnds-reply.serverNow;
     if(watch!==null){navigator.geolocation.clearWatch(watch);watch=null;}
-    geo.hidden=true;lock.hidden=true;phase='challenge';
+    geo.hidden=true;lock.hidden=true;phase='challenge';capture.dataset.view='challenge';
+    reply.order.forEach(action=>{
+      const li=document.createElement('li'),num=document.createElement('span');
+      li.append(num,document.createTextNode(directions[action]));list.append(li);
+    });
+    list.hidden=false;highlight(0);
     let stageStart=performance.now(),frames=0,lastTime=-1,lastInference=-1000;
     function detect(t){
       if(!current()||phase!=='challenge')return;
@@ -151,13 +167,14 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
         if(video.currentTime!==lastTime&&video.readyState>=2&&t-lastInference>=80){
           lastTime=video.currentTime;lastInference=t;
           const pose=readPose(model.detectForVideo(video,t)),action=reply.order[steps.length];
-          status.textContent='Langkah '+(steps.length+1)+'/3 · '+directions[action]+(!pose?' · Tampilkan tepat satu wajah':'');
+          const hint='Langkah '+(steps.length+1)+'/3 · '+(pose?directions[action]:'Tampilkan tepat satu wajah');
+          if(status.textContent!==hint)status.textContent=hint;
           frames=poseMatches(action,pose)?frames+1:0;
           if(frames>=3){
             if(action==='SMILE')image=snapshot(video);
             steps.push({action,seconds:Math.max(0.001,Math.round(t-stageStart)/1000),frames});
             if(steps.length===reply.order.length){review().catch(handleError);return;}
-            frames=0;stageStart=t;
+            highlight(steps.length);frames=0;stageStart=t;
           }
         }
         frame=requestAnimationFrame(detect);
@@ -180,7 +197,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   }
   async function review(){
     if(!image)throw Error('Foto senyum belum terekam. Ulangi perekaman.');
-    phase='sealing';photo.src=image;photo.hidden=false;video.hidden=true;halt();
+    phase='sealing';capture.dataset.view='proof';list.hidden=true;photo.src=image;photo.hidden=false;video.hidden=true;halt();
     status.classList.add('capture-working');status.textContent='Memverifikasi foto…';
     digest=await digestPhoto(image);if(!current()||phase!=='sealing')return;
     const reply=await timedCall('CAPTURE_SEAL',{submissionId:lockState.submissionId,digest,steps,faceCount:1});
@@ -189,7 +206,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     expiresPerf=reply.expires-serverOffsetUpper;
     expiresWall=Date.now()+expiresPerf-performance.now();
     status.classList.remove('capture-working');
-    phase='review';status.textContent='Periksa foto sebelum mengirim.';
+    phase='review';status.textContent='Semua tantangan lulus. Periksa foto sebelum mengirim.';
     updateClock();
     if(phase==='review')clock.hidden=retake.hidden=submit.hidden=false;
   }
@@ -213,7 +230,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     if(!current())return;
     if(receipt){accepted(receipt);return;}
     if(remaining()<=0){fail('Tanda terima belum ditemukan dan bukti kedaluwarsa. Periksa Beranda sebelum merekam ulang.');return;}
-    phase='review';closeButton.disabled=false;clock.hidden=false;
+    phase='review';retake.disabled=retake.hidden=closeButton.disabled=clock.hidden=false;
     busyButton(submit,'Kirim ulang presensi',false);
     status.textContent='Tanda terima belum ditemukan. Kamu bisa mengirim ulang dengan ID transaksi yang sama.';
     updateClock();
@@ -223,7 +240,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     if(phase==='receiptPending'){await reconcile();return;}
     if(phase!=='review')return;
     updateClock();if(phase!=='review')return;
-    phase='sending';clock.hidden=true;retake.disabled=closeButton.disabled=true;
+    phase='sending';clock.hidden=retake.hidden=true;retake.disabled=closeButton.disabled=true;
     busyButton(submit,'Mengirim presensi…',true);status.textContent='Menunggu tanda terima dari server…';
     try{
       const result=await send({id:lockState.submissionId,action:type,shiftDate:info.shiftDate,scheduleId:info.scheduleId,
@@ -239,7 +256,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   dialog.addEventListener('close',()=>{if(!dialog.open)dispose();},events);
   window.addEventListener('pagehide',()=>{dispose();if(dialog.open)dialog.close();},{once:true,signal:abort.signal});
   document.addEventListener('visibilitychange',()=>{
-    if(document.hidden&&['location','locking','challenge'].includes(phase))fail('Perekaman terjeda. Buka kembali kamera dan kunci lokasi.');
+    if(document.hidden&&['setup','location','locking','challenge'].includes(phase))fail('Perekaman terjeda. Buka kembali kamera dan kunci lokasi.');
     else updateClock();
   },events);
   panel.addEventListener('click',e=>{

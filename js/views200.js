@@ -24,7 +24,7 @@ export function requestList(items,review=false){
   if(!items.length)return empty('Belum ada permohonan.');
   return items.map(r=>'<button class="request-row" data-act="request:'+esc(encodeURIComponent(r.id))+'"><b>'+
     esc((review?r.employeeId+' · ':'')+requestNames[r.kind])+'</b><small>'+esc(r.day+(r.end&&r.end!==r.day?' – '+r.end:''))+
-    '</small><span>'+esc(stages[r.status]||r.status)+'</span></button>').join('');
+    '</small><span>'+esc((r.scope==='MOBILE_TEST'?'MODE UJI · ':'')+(stages[r.status]||r.status)+(r.issue?' · Perlu ditinjau':''))+'</span></button>').join('');
 }
 export function leavePage({data,items,day,registered,fmtDay}){
   return '<h1>'+icon('doc')+' Izin</h1><section class="card request-info"><div>'+icon('calendar')+
@@ -34,24 +34,31 @@ export function leavePage({data,items,day,registered,fmtDay}){
     '<div class="two">'+btn('newdraft',requestNames.LEAVE,'primary','doc')+btn('incident',requestNames.INCIDENT,'secondary','shield')+'</div>'+
     card('Riwayat permohonan',requestList(items));
 }
-export function requestForm(kind,d={},today){
+export function requestForm(kind,d={},today,test=false){
   const incident=kind==='INCIDENT';
-  return '<form id="request-form" data-kind="'+kind+'" data-id="'+esc(d.id||'')+'"><label class="formlabel">'+
-    (incident?'Tanggal insiden':'Dari tanggal')+'<input class="control" required type="date" name="day" value="'+esc(d.day||today)+'"></label>'+
+  return '<form id="request-form" data-kind="'+kind+'" data-test="'+(test?'yes':'no')+'" data-id="'+esc(d.id||'')+'"><label class="formlabel">'+
+    (incident?'Tanggal mulai shift yang terdampak':'Dari tanggal')+'<input class="control" required type="date" name="day" value="'+esc(d.day||today)+'"></label>'+
     (incident?'':'<label class="formlabel">Sampai tanggal<input class="control" required type="date" name="end" value="'+esc(d.end||d.day||today)+'"></label>')+
     '<label class="formlabel">'+(incident?'Uraian kejadian':'Alasan izin')+'<textarea class="control" rows="3" required maxlength="500" name="reason">'+
-    esc(d.reason||'')+'</textarea></label>'+(incident?'<label class="request-check"><input type="checkbox" name="adjustment" '+(d.adjustment?'checked':'')+'> Mohon penyesuaian jadwal</label>':'')+
+    esc(d.reason||'')+'</textarea></label>'+(incident?'<p>'+ (test?'MODE UJI · Laporan ini hanya untuk simulasi.':'Setelah insiden disetujui, kode jadwal tanggal tersebut menjadi I.')+'</p>':'')+
     '<div class="two"><button class="secondary" type="submit" value="draft">Simpan draf</button><button class="primary" type="submit" value="send">Kirim pengajuan</button></div></form>';
 }
 export function requestDetail(r,review){
   const id=esc(encodeURIComponent(r.id)),pending=r.status==='PENDING';
-  return line('Status',esc(stages[r.status]||r.status))+line('Tanggal',esc(r.day+(r.end!==r.day?' – '+r.end:'')))+
-    '<p class="prose-request">'+esc(r.reason)+'</p>'+(r.adjustment?'<p>Memohon penyesuaian jadwal. Pengelola memproses perubahan melalui administrasi jadwal.</p>':'')+
+  const incident=r.kind==='INCIDENT',correction=incident&&['APPROVED','REJECTED'].includes(r.status);
+  const decisions=(r.history||[]).map(e=>'<li><b>'+esc(e.prior+' → '+e.decision)+'</b><small>'+
+    esc('Revisi '+e.revision+' · '+e.actor+' · '+e.at+' WIB')+'</small><p>'+esc(e.reason||'Tanpa catatan tambahan')+'</p></li>').join('');
+  return (r.scope==='MOBILE_TEST'?chip('MODE UJI','yellow'):'')+line('Status',esc(stages[r.status]||r.status))+line('Tanggal',esc(r.day+(r.end!==r.day?' – '+r.end:'')))+
+    '<p class="prose-request">'+esc(r.reason)+'</p>'+(incident?line('Jenis',esc(r.requestType||'Insiden')):'')+
+    (r.at&&typeof r.at==='string'?line('Diajukan',esc(r.at)+' WIB'):'')+
+    (decisions?line('Jumlah koreksi',(r.history||[]).filter(e=>e.prior!=='PENDING').length)+'<h3>Riwayat keputusan</h3><ol class="incident-history">'+decisions+'</ol>':'')+
     (r.issue?'<p>'+esc(r.issue)+'</p>':'')+(r.reviewedBy?line('Keputusan',esc(r.reviewedBy+' · '+r.reviewedAt)):'')+
     (r.notes?'<p class="prose-request">'+esc(r.notes)+'</p>':'')+
     (r.status==='DRAFT'?btn('editRequest:'+id,'Buka draf','primary')+' '+btn('deleteDraft:'+id,'Hapus draf','secondary'):'')+
     (r.status==='QUEUED'?btn('resendRequest','Periksa pengiriman','primary'):'')+
-    (pending&&review?'<form id="request-decision" data-id="'+id+'"><label class="formlabel">Keputusan<select name="decision"><option value="APPROVED">Setujui</option><option value="REJECTED">Tolak</option></select></label><label class="formlabel">Catatan keputusan<textarea name="notes" maxlength="500" rows="2"></textarea></label><button class="primary full">Simpan keputusan</button></form>':
+    ((pending||correction)&&review&&(!incident||Number.isInteger(r.revision))?'<form id="request-decision" data-id="'+id+'" data-revision="'+esc(r.revision||0)+'"><label class="formlabel">'+(correction?'Koreksi keputusan':'Keputusan')+'<select name="decision">'+
+    (r.status!=='APPROVED'?'<option value="APPROVED">Setujui</option>':'')+(r.status!=='REJECTED'?'<option value="REJECTED">Tolak</option>':'')+
+    '</select></label><label class="formlabel">'+(correction?'Alasan koreksi':'Catatan keputusan')+'<textarea name="notes" maxlength="500" rows="2" '+(incident||correction?'required minlength="5"':'')+'></textarea></label><button class="primary full">Simpan keputusan</button></form>':
     pending&&!review?btn('cancelRequest:'+id,'Batalkan permohonan','secondary'):'');
 }
 export function lateCard(report,month,isVerifier,periodButton){

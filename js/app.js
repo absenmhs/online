@@ -84,6 +84,7 @@ function applyContext(result) {
     offset:result.serverEpoch ? result.serverEpoch-Date.now() : current.offset || 0,
     clockSynced:!!result.serverEpoch
   });
+  if (typeof result.incidentTest==='boolean')current.incidentTest=result.incidentTest;
   if (typeof result.writeOpen==='boolean') current.writeOpen=result.writeOpen;
   if (result.shifts) current.shifts = result.shifts;
   saveSession();
@@ -285,7 +286,7 @@ function showDay(date){
    return '<section class="day-block"><h3>'+label(t)+'</h3>'+(records.length?entries(records):'<small>Belum ada transaksi</small>')+'</section>';
  }).join('');
  modal('Detail Presensi Harian',line('Tanggal shift',esc(fmtDay(date,{weekday:'long',day:'numeric',month:'long',year:'numeric'})))+
-   line('Jenis shift',esc(d.shift||'Belum terjadwal'))+line('Jadwal masuk–pulang',esc(d.start&&d.end?d.start+' – '+d.end+(d.nextDay?' (+1 hari)':''):'—'))+
+   line('Jenis shift',esc(d.shift==='I'?'I · Insiden disetujui':d.shift||'Belum terjadwal'))+(d.shift==='I'?line('Shift asli',esc(d.originalShift||'Belum terjadwal')):'')+line('Jadwal masuk–pulang',esc(d.start&&d.end?d.start+' – '+d.end+(d.nextDay?' (+1 hari)':''):'—'))+
    line('Status harian',esc(daily&&d.state!=='REVIEW'?dayExplanation(daily):stateName(d.state)))+blocks+previewCard(mobilePreview(),date));
 }
 function leave(){
@@ -293,7 +294,19 @@ function leave(){
 }
 function menu(act,ic,title,sub){return btn(act,'<span><b>'+title+'</b><small>'+sub+'</small></span>','card menu',ic)}
 function profile(){
- return '<h1>'+icon('user')+' Profil Saya</h1><section class="account profile wave">'+avatar()+'<div class="details"><b>'+esc(session.name||session.username)+'</b><small>'+esc(session.employeeId)+'</small><small>'+icon('work')+' '+esc(session.unit||session.profession||session.role)+'</small>'+chip(session.role==='VERIFIER'?'Verifikator':'Pegawai aktif','green')+'</div></section>'+menu('photo','user','Foto Profil','Ganti atau hapus foto di perangkat ini')+menu('account','user','Informasi '+(session.role==='VERIFIER'?'Verifikator':'Pegawai'),'Data akun dan unit kerja')+(session.role==='EMPLOYEE'?menu('schedule','calendar','Jadwal Kerja','Jadwal terakhir dari server'):'')+menu('settings','settings','Pengaturan Aplikasi','Pemasangan dan keamanan akun')+menu('about','info','Tentang Aplikasi','Absensi Kehadiran Outsourcing · Pilot')+menu('help','info','Bantuan & Panduan','Panduan penggunaan aplikasi')+menu('logout','enter','Keluar','Keluar dari aplikasi')+'<p class="foot">Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p>';
+ const role=session.role==='VERIFIER'?'Verifikator':'Pegawai';
+ const group=(title,items)=>'<section class="profile-group"><h2>'+title+'</h2>'+items+'</section>';
+ return '<h1>'+icon('user')+' Profil Saya</h1><section class="account profile wave"><div class="profile-picture">'+avatar()+
+   '<button type="button" class="avatar-plus" data-act="photo" aria-label="Ganti atau hapus foto profil">+</button></div><div class="details"><b>'+
+   esc(session.name||session.username)+'</b><small>'+esc(session.employeeId)+'</small><small>'+icon('work')+' '+
+   esc(session.unit||session.profession||role)+'</small>'+chip(role+' aktif','green')+'</div></section>'+
+   group('Informasi '+role,menu('account','user','Informasi '+role,'Data akun dan unit kerja')+
+     (role==='Pegawai'?menu('schedule','calendar','Jadwal Kerja','Lihat jadwal dan shift') : ''))+
+   group('Akun dan Koneksi',menu('security','lock','Keamanan Akun','Password dan pemulihan akses')+
+     menu('settings','refresh','Status Koneksi &amp; Sinkronisasi','Sinkronisasi data dan diagnostik'))+
+   group('Aplikasi',menu('install','enter','Pasang Aplikasi','Tambahkan ke layar utama')+
+     menu('about','info','Tentang','Versi dan informasi aplikasi')+menu('help','doc','Bantuan &amp; Panduan','Panduan penggunaan'))+
+   menu('logout','enter','Keluar','Akhiri sesi akun ini');
 }
 function verification(){return '<h1>'+icon('shield')+' Verifikasi Absensi</h1><p class="subhead">Tinjau transaksi pilot yang menunggu keputusan.</p><div class="card wave between"><b>'+verifier.length+' transaksi dalam antrean</b><button data-act="sync" class="clock-refresh" aria-label="Perbarui antrean" title="Perbarui antrean">'+icon('refresh')+'</button></div>'+(!navigator.onLine?msg('Koneksi diperlukan untuk memuat dan memutuskan transaksi.'):'')+(verifier.map(r=>'<button class="card entry" data-review="'+esc(r.recordId)+'">'+icon('calendar')+'<span><b>'+esc(r.employeeName||'Nama pegawai belum tersedia')+' · '+esc(label(r.type))+'</b><small>'+esc(fmtDay(r.localDate))+(r.mobileTest?' · MODE UJI'+(r.testRunId?' · Sesi '+esc(r.testRunId.slice(0,8)):'')+' · GPS simulasi':'')+'</small></span>'+chip('Tinjau','yellow')+'</button>').join('')||card('Antrean verifikator',empty(loaded?'Tidak ada transaksi yang menunggu keputusan.':'Antrean pusat belum dimuat.')))+
    lateCard(lateness,period,true,periodButton)+(requestData?.reviewer?card('Permohonan pegawai',requestList(requestData.items,true)):'')}
@@ -337,7 +350,7 @@ async function synchronize(manual=false){
   if (session !== s) return;
   if (result.code !== 'REFRESH_READY' || !result.context) throw Error('Format pembaruan tidak valid.');
   applyContext(result.context);
-  if(!['2.1.0','2.2.0'].includes(result.apiVersion)||!result.requests)throw Error('Perbarui backend ke v2.2.0.');
+  if(result.apiVersion!=='2.3.0'||!result.requests)throw Error('Perbarui backend ke v2.3.0.');
   requestData=result.requests;lateness=result.lateness;
   if(requestedMonth===period&&navigator.onLine){
     clearPreview();preview=result.mobileTestPreview||[];previewMonth=requestedMonth;
@@ -379,7 +392,7 @@ async function sendQueuedRequests(s,owner){
  for(const d of await owned('drafts',owner)){
    if(d.status!=='QUEUED'||s!==session||!navigator.onLine)continue;
    try{
-     const result=await api('REQUEST_SUBMIT',{payload:{id:d.id,kind:d.kind,day:d.day,end:d.end,reason:d.reason,adjustment:!!d.adjustment}});
+     const result=await api('REQUEST_SUBMIT',{payload:{id:d.id,kind:d.kind,day:d.day,end:d.end,reason:d.reason,adjustment:!!d.adjustment,testDraft:d.testDraft===true}});
      if(result.code!=='REQUEST_SAVED'||result.item?.id!==d.id)throw Error('Tanda terima pengajuan belum valid.');
      await put('drafts',{...d,...result.item,owner,issue:''});
    }catch(e){
@@ -462,6 +475,8 @@ async function capture(action){
  }finally{capturing=false;if(s===session){await local();render();scheduleSync(true,true);}}
 }
 function auditPage(){
+ const reports=requestData?.reviewer?requestData.items.filter(r=>r.kind==='INCIDENT'&&(!auditEmployee||r.employeeId===auditEmployee)):[];
+ const incidentReport=requestData?.reviewer?card('Laporan insiden',line('Jumlah laporan resmi',reports.filter(r=>r.scope!=='MOBILE_TEST').length)+requestList(reports,true)):'';
  const from=dateKey(now()-6*86400000),to=dateKey(now());
  const people=(audit?.employees||[]).slice().sort((a,b)=>a.name.localeCompare(b.name,'id'));
  const items=(audit?.items||[]).filter(r=>(!auditEmployee||r.employeeId===auditEmployee)&&
@@ -474,7 +489,7 @@ function auditPage(){
    (items.map(r=>'<button class="card entry" data-act="auditRecord:'+esc(r.recordId)+'">'+icon('history')+
      '<span><b>'+esc(r.employeeName||r.employeeId)+'</b><small>'+esc(label(r.type)+' · Keputusan '+r.decisions[0].at+' WIB')+
      (r.mobileTest?' · MODE UJI'+(r.testRunId?' · Sesi '+esc(r.testRunId.slice(0,8)):''):'')+'</small></span>'+chip(label(r.verificationStatus),r.verificationStatus==='VERIFIED'?'green':'yellow')+'</button>').join('')||
-     empty(!audit?(navigator.onLine?'Menunggu data riwayat verifikasi.':'Hubungkan internet untuk memuat riwayat verifikasi.'):'Belum ada keputusan dalam tujuh hari ini.'));
+     empty(!audit?(navigator.onLine?'Menunggu data riwayat verifikasi.':'Hubungkan internet untuk memuat riwayat verifikasi.'):'Belum ada keputusan dalam tujuh hari ini.'))+incidentReport;
 }
 function reviewIntro(r){
  const captureTime=r.localTime?esc(r.localTime)+' WIB':'Belum tersedia';
@@ -574,7 +589,7 @@ async function commitVerifierDecision(request,mayRepair=true) {
     throw Error('Hasil verifikasi belum dapat dipastikan. Jangan mengirim ulang sebelum memeriksa Verification_Log dan Status_View.');
   }
 }
-function showDraft(kind='LEAVE',d={}){modal(requestNames[kind],requestForm(kind,d,dateKey(now())));}
+function showDraft(kind='LEAVE',d={}){modal(requestNames[kind],requestForm(kind,d,dateKey(now()),d.testDraft||session.incidentTest!==false));}
 function details(r){
  const shift=r.shiftDate,day=shift&&dailyRows.find(d=>d.workDate===dateISO(shift));
  modal('Detail '+label(r.type),line('Tanggal shift',r.shiftDate?esc(fmtDay(shift)):'Belum tersedia')+
@@ -594,7 +609,7 @@ async function decideRequest(id,route,data){
  if(result.code!=='REQUEST_SAVED'||result.item?.id!==id)throw Error('Tanda terima tidak sesuai.');
  if(requestData)requestData.items=requestData.items.map(x=>x.id===id?result.item:x);
  if(current.role==='EMPLOYEE')await put('drafts',{...result.item,owner:own()});
- dialog.close();render();toast('Status permohonan diperbarui.');await scheduleSync(true,true);
+ dialog.close();render();toast(result.rollup==='RETRY_REQUIRED'?'Keputusan tercatat. Rekap menunggu rekonsiliasi pengelola.':'Status permohonan diperbarui.');await scheduleSync(true,true);
 }
 async function act(a){
  const [key,arg]=a.split(':');
@@ -631,7 +646,8 @@ async function act(a){
  case 'resendRequest':dialog.close();await scheduleSync(true,true);break;
  case 'updates':modal('Status sinkronisasi','<p>'+esc(session.role==='VERIFIER'?'Antrean verifikasi diperbarui saat aplikasi aktif.':queue.length+' transaksi lokal menunggu sinkronisasi.')+'</p>'+btn('sync','Perbarui dari server','primary','refresh'));break;
  case 'account':modal('Informasi akun',line('Identitas',esc(session.employeeId))+line('Username',esc(session.username))+line('Nama',esc(session.name||'—'))+line('Profesi',esc(session.profession||'—'))+line('Unit',esc(session.unit||'—')));break;
- case 'schedule':modal('Jadwal kerja','<p>Referensi terakhir yang dikembalikan validator jadwal.</p>'+actNames.map(x=>{const r=session.shifts?.[x];return line(label(x),r?.scheduleId?esc([r.shiftDate,r.shiftCode,r.scheduleId].filter(Boolean).join(' · ')):'Belum tersedia')}).join(''));break;
+ case 'schedule':modal('Jadwal kerja',btn('openCalendar','Buka Kalender Shift','primary')+'<p>Referensi terakhir yang dikembalikan validator jadwal.</p>'+actNames.map(x=>{const r=session.shifts?.[x];return line(label(x),r?.scheduleId?esc([r.shiftDate,requestData?.items.some(i=>i.kind==='INCIDENT'&&i.status==='APPROVED'&&i.scope!=='MOBILE_TEST'&&i.day===r.shiftDate)?'I · Insiden disetujui':r.shiftCode,r.scheduleId].filter(Boolean).join(' · ')):'Belum tersedia')}).join(''));break;
+ case 'openCalendar':dialog.close();await act('calendar');break;
  case 'photo':
    modal('Foto profil lokal','<p>Foto disimpan untuk akun ini di perangkat ini. Foto tidak otomatis tersedia di perangkat lain dan hanya digunakan untuk tampilan profil.</p>'+
      '<form id="photo-form"><label class="formlabel">Pilih foto JPG, PNG, WebP · maksimal 5 MB'+
@@ -649,10 +665,17 @@ async function act(a){
      '<p>Durasi permintaan mencakup jaringan dan server. Satuan milidetik.</p>'+
      getTimings().map(sample=>'<p>'+esc(JSON.stringify(sample))+'</p>').join('') :
      '<p>Pengelola dapat mengaktifkan MHS_POC_PROFILE_ENABLED=YES, lalu menguji login ulang.</p>');break;
+ case 'security':
+   modal('Keamanan Akun','<div class="security-symbol">'+icon('shield')+'</div>'+
+     menu('password','lock','Ubah Password','Ganti password akun Anda')+
+     menu('recovery','shield','Lupa Password','Pemulihan melalui operator')+btn('backProfile','Kembali ke Profil','secondary'));break;
+ case 'recovery':
+   modal('Lupa Password','<p>Hubungi operator Kabupaten Kotawaringin Timur untuk verifikasi identitas dan pengaturan ulang password akun.</p>'+btn('security','Kembali ke Keamanan Akun','secondary'));break;
+ case 'backProfile':dialog.close();break;
  case 'settings':{
    const current=session;
-   const buttons=btn('install','Pasang aplikasi','primary')+btn('password','Ubah password','secondary')+btn('probe','Uji koneksi API','secondary');
-   modal('Pengaturan aplikasi','<div class="inline" id="settings-actions">'+buttons+'</div>');
+   const buttons=btn('sync','Perbarui dari server','primary')+btn('probe','Uji koneksi API','secondary');
+   modal('Status Koneksi & Sinkronisasi','<p>'+esc(navigator.onLine?'Internet terhubung':'Offline')+' · '+esc(current.role==='EMPLOYEE'?queue.length+' presensi dan '+drafts.filter(d=>d.status==='QUEUED').length+' permohonan dalam antrean':'Antrean Verifikator')+'</p><div class="inline" id="settings-actions">'+buttons+'</div>');
    const controls=$('#settings-actions');
    if(!navigator.onLine||current.role!=='EMPLOYEE')break;
    const state=await api('TEST_SETTINGS');
@@ -684,8 +707,8 @@ async function act(a){
  }
  case 'probe':await probe();modal('Uji koneksi API','<p>✓ GET health terbaca.</p><p>✓ POST tanpa token menghasilkan SESSION_REQUIRED.</p><p>Transport siap diuji dengan akun pilot.</p>');break;
  case 'install':if(installEvent){await installEvent.prompt();installEvent=null}else toast('Buka menu browser → Instal aplikasi / Tambahkan ke layar utama.');break;
- case 'password':modal('Ubah password',passwordForm());break;
- case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.2.0</p>');break;
+ case 'password':modal('Ubah Password',passwordForm()+btn('security','Kembali ke Keamanan Akun','secondary'));break;
+ case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.3.0</p>');break;
  case 'help':modal('Bantuan & panduan','<p>Masuk saat online untuk memuat jadwal. Izinkan kamera dan GPS, kunci lokasi, lalu selesaikan tiga tantangan. Tinjau foto dan kirim dalam lima menit.</p><p>Buka tab Shift untuk detail harian atau tekan warna di Ringkasan Status untuk melihat riwayat.</p>');break;
  case 'logout':modal('Keluar dari aplikasi?','<p>Foto presensi yang belum dikirim akan dihapus saat perekaman ditutup.</p>'+btn('confirmLogout','Keluar','danger'));break;
  case 'confirmLogout':{let revoked=false;try{if(navigator.onLine){await api('LOGOUT');revoked=true}}finally{clearSession();toast(revoked?'Anda telah keluar.':'Sesi lokal ditutup. Sesi server berakhir sesuai masa berlakunya.')}break}
@@ -756,13 +779,13 @@ document.addEventListener('submit',async e=>{
     render();await scheduleSync(true,true);break;
   }
   case 'month':clearPreview();period=input.month;dialog.close();await local();render();scheduleSync(true);break;
-  case 'request-decision':await decideRequest(decodeURIComponent(f.dataset.id),'REQUEST_DECIDE',input);break;
+  case 'request-decision':await decideRequest(decodeURIComponent(f.dataset.id),'REQUEST_DECIDE',{...input,baseRevision:Number(f.dataset.revision)});break;
   case 'request-form':{
     const s=session,owner=own(),kind=f.dataset.kind,reason=input.reason.trim(),end=kind==='LEAVE'?input.end:input.day;
     if(!reason||end<input.day)throw Error('Periksa uraian dan urutan tanggal.');
     const send=e.submitter?.value==='send',id=f.dataset.id||crypto.randomUUID();
     f.dataset.id=id;
-    await put('drafts',{id,owner,kind,day:input.day,end,reason,adjustment:input.adjustment==='on',at:Date.now(),status:send?'QUEUED':'DRAFT'});
+    await put('drafts',{id,owner,kind,day:input.day,end,reason,adjustment:drafts.find(d=>d.id===id)?.adjustment===true,testDraft:kind==='INCIDENT'&&f.dataset.test==='yes',at:Date.now(),status:send?'QUEUED':'DRAFT'});
     if(session!==s)break;
     await local();dialog.close();tab='doc';render();
     toast(send?'Pengajuan masuk antrean pengiriman.':'Draf tersimpan di perangkat.');
