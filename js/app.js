@@ -34,7 +34,7 @@ const refreshScheduler = createRefreshScheduler(
 );
 const pending='Menunggu verifikasi', titles={home:'Beranda',history:'Riwayat',calendar:'Shift',audit:'Riwayat Verifikasi',doc:'Izin',user:'Profil',verify:'Verifikasi'};
 const labels={PENDING:pending,VERIFIED:'Disetujui',REJECTED:'Ditolak',NEEDS_CORRECTION:'Perlu koreksi',CONFIRMED:'Terkirim',CHECK_IN:'Check-in',CHECK_OUT:'Check-out',CHECKIN:'Check-in',CHECKOUT:'Check-out'};
-const errors={CORRECTION_CONFLICT:'Keputusan sudah berubah atau catatan belum selaras. Buka kembali Riwayat Verifikasi.',CORRECTION_WINDOW_CLOSED:'Keputusan sudah di luar periode koreksi tujuh hari.',POC_WRITE_DISABLED:'Presensi sementara belum dibuka oleh pengelola.',EVIDENCE_EXPIRED:'Bukti sudah kedaluwarsa. Rekam ulang presensi.',CHALLENGE_EXPIRED:'Waktu tantangan habis. Rekam ulang presensi.',CAPTURE_INVALID:'Sesi perekaman berakhir. Rekam ulang presensi.',LIVENESS_INCOMPLETE:'Hasil tantangan tidak lengkap atau melewati batas waktu. Rekam ulang presensi.',PHOTO_UNAVAILABLE:'Foto belum tersedia atau telah melewati masa simpan.',DUPLICATE_SHIFT_ACTION:'Transaksi ini sudah tercatat untuk shift yang sama.',PHOTO_MISMATCH:'Foto berbeda dari bukti yang dikonfirmasi.',GEOFENCE_REJECTED:'Lokasi atau akurasi belum memenuhi batas kantor.',EVIDENCE_REQUIRED:'Sesi bukti berakhir. Rekam ulang presensi.',INVALID_CREDENTIALS:'Username atau password tidak cocok.',API_DISABLED:'Pengelola perlu mengaktifkan API PoC.',SIMULATION_PANEL_ONLY:'Mode simulasi sidebar masih aktif.',MOBILE_TEST_CONFIG_INVALID:'Konfigurasi Mobile Test belum lengkap. Periksa Script Properties.',MOBILE_TEST_MODE_CHANGED:'Mode uji berubah saat perekaman. Rekam ulang.',TIME_WINDOW_CLOSED:'Jendela waktu absensi sudah tutup.',CHECKIN_REQUIRED_FOR_CHECKOUT:'Server belum menerima Check-in untuk shift ini.',SESSION_EXPIRED:'Sesi berakhir. Masuk kembali dengan akun yang sama.',REASON_REQUIRED:'Isi alasan minimal lima karakter.',PASSWORD_LENGTH:'Panjang password belum sesuai kebijakan yang ditampilkan.',PASSWORD_COMPLEXITY:'Gunakan minimal satu huruf, satu angka, dan satu simbol.',PASSWORD_CHANGE_REQUIRED:'Ganti password awal terlebih dahulu.',SCHEDULE_NOT_PUBLISHED:'Jadwal belum disetujui untuk absensi.',DEPENDENCY_UNAVAILABLE:'Modul aturan jadwal tidak tersedia di proyek Apps Script.'};
+const errors={TEST_RUN_CHANGED:'Sesi uji telah berganti. Buka ulang perekaman atau pengaturan.',DEVELOPER_FORBIDDEN:'Mode developer sudah ditutup untuk akun ini.',CORRECTION_CONFLICT:'Keputusan sudah berubah atau catatan belum selaras. Buka kembali Riwayat Verifikasi.',CORRECTION_WINDOW_CLOSED:'Keputusan sudah di luar periode koreksi tujuh hari.',POC_WRITE_DISABLED:'Presensi sementara belum dibuka oleh pengelola.',EVIDENCE_EXPIRED:'Bukti sudah kedaluwarsa. Rekam ulang presensi.',CHALLENGE_EXPIRED:'Waktu tantangan habis. Rekam ulang presensi.',CAPTURE_INVALID:'Sesi perekaman berakhir. Rekam ulang presensi.',LIVENESS_INCOMPLETE:'Hasil tantangan tidak lengkap atau melewati batas waktu. Rekam ulang presensi.',PHOTO_UNAVAILABLE:'Foto belum tersedia atau telah melewati masa simpan.',DUPLICATE_SHIFT_ACTION:'Transaksi ini sudah tercatat untuk shift yang sama.',PHOTO_MISMATCH:'Foto berbeda dari bukti yang dikonfirmasi.',GEOFENCE_REJECTED:'Lokasi atau akurasi belum memenuhi batas kantor.',EVIDENCE_REQUIRED:'Sesi bukti berakhir. Rekam ulang presensi.',INVALID_CREDENTIALS:'Username atau password tidak cocok.',API_DISABLED:'Pengelola perlu mengaktifkan API PoC.',SIMULATION_PANEL_ONLY:'Mode simulasi sidebar masih aktif.',MOBILE_TEST_CONFIG_INVALID:'Konfigurasi Mobile Test belum lengkap. Periksa Script Properties.',MOBILE_TEST_MODE_CHANGED:'Mode uji berubah saat perekaman. Rekam ulang.',TIME_WINDOW_CLOSED:'Jendela waktu absensi sudah tutup.',CHECKIN_REQUIRED_FOR_CHECKOUT:'Server belum menerima Check-in untuk shift ini.',SESSION_EXPIRED:'Sesi berakhir. Masuk kembali dengan akun yang sama.',REASON_REQUIRED:'Isi alasan minimal lima karakter.',PASSWORD_LENGTH:'Panjang password belum sesuai kebijakan yang ditampilkan.',PASSWORD_COMPLEXITY:'Gunakan minimal satu huruf, satu angka, dan satu simbol.',PASSWORD_CHANGE_REQUIRED:'Ganti password awal terlebih dahulu.',SCHEDULE_NOT_PUBLISHED:'Jadwal belum disetujui untuk absensi.',DEPENDENCY_UNAVAILABLE:'Modul aturan jadwal tidak tersedia di proyek Apps Script.'};
 const label=v=>labels[v]||v||'—';
 const wib=(d,opts)=>new Intl.DateTimeFormat('id-ID',{timeZone:'Asia/Jakarta',...opts}).format(d);
 const dateKey=d=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
@@ -221,7 +221,7 @@ function dashboard(){
  const todayLines=actNames.map((a,i)=>{
    const type=i?'CHECK_OUT':'CHECK_IN',shift=session.shifts?.[a]?.shiftDate||today;
    const r=todayRows.find(x=>x.type===type&&dateISO(x.shiftDate||x.localDate)===shift);
-   const q=queue.find(x=>x.action===a&&(x.shiftDate||x.payload?.shiftDate)===shift);
+   const q=queue.find(x=>!x.testRunId&&x.action===a&&(x.shiftDate||x.payload?.shiftDate)===shift);
    return line('<span class="dot '+(r?'on':'')+'"></span>'+label(a)+(shift!==today?' · '+esc(fmtDay(shift)):''),esc(r?label(r.verificationStatus):q?'Menunggu konfirmasi':lastSync?'Belum tercatat':'Belum dimuat'));
  }).join('');
  return '<h1>Selamat '+(hr<11?'Pagi':hr<15?'Siang':hr<18?'Sore':'Malam')+' 👋</h1><section class="account">'+avatar()+'<div class="details"><b>'+
@@ -266,7 +266,7 @@ function calendar(){
    }
    const times=[d.checkInTime??legacyTime(day?.checkInRecordId,'CHECK_IN'),
      d.checkOutTime??legacyTime(day?.checkOutRecordId,'CHECK_OUT')];
-   const shift=({NORMAL:'N',PAGI:'P',SORE:'S',MALAM:'M',LIBUR:'L'})[d.shift]||String(d.shift||'').slice(0,3);
+   const shift=({NORMAL:'P',PAGI:'P',SORE:'S',MALAM:'M',LIBUR:'L'})[d.shift]||String(d.shift||'').slice(0,3);
    const description=[fmtDay(d.workDate),d.shift,stateName(d.state),'Check-in '+(times[0]||'—'),'Check-out '+(times[1]||'—')].filter(Boolean).join(' · ');
    return '<button class="cal-day" data-state="'+esc(d.state)+'" data-act="day:'+esc(d.workDate)+'" title="'+esc(description)+'" aria-label="'+
      esc(description)+'" '+(d.workDate===today?'aria-current="date"':'')+'><b>'+Number(d.workDate.slice(-2))+'</b>'+
@@ -295,7 +295,7 @@ function menu(act,ic,title,sub){return btn(act,'<span><b>'+title+'</b><small>'+s
 function profile(){
  return '<h1>'+icon('user')+' Profil Saya</h1><section class="account profile wave">'+avatar()+'<div class="details"><b>'+esc(session.name||session.username)+'</b><small>'+esc(session.employeeId)+'</small><small>'+icon('work')+' '+esc(session.unit||session.profession||session.role)+'</small>'+chip(session.role==='VERIFIER'?'Verifikator':'Pegawai aktif','green')+'</div></section>'+menu('photo','user','Foto Profil','Ganti atau hapus foto di perangkat ini')+menu('account','user','Informasi '+(session.role==='VERIFIER'?'Verifikator':'Pegawai'),'Data akun dan unit kerja')+(session.role==='EMPLOYEE'?menu('schedule','calendar','Jadwal Kerja','Jadwal terakhir dari server'):'')+menu('settings','settings','Pengaturan Aplikasi','Pemasangan dan keamanan akun')+menu('about','info','Tentang Aplikasi','Absensi Kehadiran Outsourcing · Pilot')+menu('help','info','Bantuan & Panduan','Panduan penggunaan aplikasi')+menu('logout','enter','Keluar','Keluar dari aplikasi')+'<p class="foot">Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p>';
 }
-function verification(){return '<h1>'+icon('shield')+' Verifikasi Absensi</h1><p class="subhead">Tinjau transaksi pilot yang menunggu keputusan.</p><div class="card wave between"><b>'+verifier.length+' transaksi dalam antrean</b><button data-act="sync" class="clock-refresh" aria-label="Perbarui antrean" title="Perbarui antrean">'+icon('refresh')+'</button></div>'+(!navigator.onLine?msg('Koneksi diperlukan untuk memuat dan memutuskan transaksi.'):'')+(verifier.map(r=>'<button class="card entry" data-review="'+esc(r.recordId)+'">'+icon('calendar')+'<span><b>'+esc(r.employeeName||'Nama pegawai belum tersedia')+' · '+esc(label(r.type))+'</b><small>'+esc(fmtDay(r.localDate))+(r.mobileTest?' · MODE UJI · GPS dan waktu simulasi':'')+'</small></span>'+chip('Tinjau','yellow')+'</button>').join('')||card('Antrean verifikator',empty(loaded?'Tidak ada transaksi yang menunggu keputusan.':'Antrean pusat belum dimuat.')))+
+function verification(){return '<h1>'+icon('shield')+' Verifikasi Absensi</h1><p class="subhead">Tinjau transaksi pilot yang menunggu keputusan.</p><div class="card wave between"><b>'+verifier.length+' transaksi dalam antrean</b><button data-act="sync" class="clock-refresh" aria-label="Perbarui antrean" title="Perbarui antrean">'+icon('refresh')+'</button></div>'+(!navigator.onLine?msg('Koneksi diperlukan untuk memuat dan memutuskan transaksi.'):'')+(verifier.map(r=>'<button class="card entry" data-review="'+esc(r.recordId)+'">'+icon('calendar')+'<span><b>'+esc(r.employeeName||'Nama pegawai belum tersedia')+' · '+esc(label(r.type))+'</b><small>'+esc(fmtDay(r.localDate))+(r.mobileTest?' · MODE UJI'+(r.testRunId?' · Sesi '+esc(r.testRunId.slice(0,8)):'')+' · GPS simulasi':'')+'</small></span>'+chip('Tinjau','yellow')+'</button>').join('')||card('Antrean verifikator',empty(loaded?'Tidak ada transaksi yang menunggu keputusan.':'Antrean pusat belum dimuat.')))+
    lateCard(lateness,period,true,periodButton)+(requestData?.reviewer?card('Permohonan pegawai',requestList(requestData.items,true)):'')}
 function render(){
  if(!session){login();return}
@@ -324,7 +324,7 @@ async function synchronize(manual=false){
       await put('queue',receiptRow(q,response));
     }else if(response.code==='RECEIPT_NOT_FOUND' && (!q.v180 || Date.now()-q.at>600000)){
       await put('queue',{id:q.id,owner,at:q.at,action:q.action,shiftDate:q.shiftDate||q.payload?.shiftDate,
-        retired:true,retiredAt:Date.now(),issue:'Bukti lama berakhir. Rekam ulang jika transaksi masih diperlukan.'});
+        testRunId:q.testRunId,retired:true,retiredAt:Date.now(),issue:'Bukti lama berakhir. Rekam ulang jika transaksi masih diperlukan.'});
     }
 
    }
@@ -335,7 +335,7 @@ async function synchronize(manual=false){
   if (session !== s) return;
   if (result.code !== 'REFRESH_READY' || !result.context) throw Error('Format pembaruan tidak valid.');
   applyContext(result.context);
-  if(result.apiVersion!=='2.0.0'||!result.requests)throw Error('Pembaruan ini memerlukan backend v2.0.0.');
+  if(result.apiVersion!=='2.1.0'||!result.requests)throw Error('Pembaruan ini memerlukan backend v2.1.0.');
   requestData=result.requests;lateness=result.lateness;
   if(requestedMonth===period&&navigator.onLine){
     clearPreview();preview=result.mobileTestPreview||[];previewMonth=requestedMonth;
@@ -410,7 +410,7 @@ function locate(timeout=20000){
 function receiptRow(q,r){
  const repair=!!r.needsStatusRepair||['ALREADY_ACCEPTED_STATUS_PENDING','RECORDED_STATUS_SYNC_PENDING'].includes(r.code);
  return {id:q.id,owner:q.owner,at:q.at,action:q.action,shiftDate:q.shiftDate||q.payload?.shiftDate,
-   v180:true,confirmed:!repair,receipt:r.recordId,issue:repair?'Diterima server · menunggu pembaruan status':''};
+   testRunId:q.testRunId,v180:true,confirmed:!repair,receipt:r.recordId,issue:repair?'Diterima server · menunggu pembaruan status':''};
 }
 async function capture(action){
  if(capturing||!valid())return;
@@ -423,7 +423,7 @@ async function capture(action){
     onAccepted:r=>toast(r.mobileTest?'MODE UJI: transaksi simulasi diterima. Tidak masuk rekap kehadiran.':
       r.needsStatusRepair?'Diterima server. Status sedang diselaraskan.':'Presensi diterima server. Menunggu verifikasi.'),
     send:async (data,maySend)=>{
-      const q={id:data.id,owner,at:data.at,shiftDate:data.shiftDate,action,v180:true,issue:'Menunggu konfirmasi penerimaan'};
+      const q={id:data.id,owner,at:data.at,shiftDate:data.shiftDate,testRunId:data.testRunId,action,v180:true,issue:'Menunggu konfirmasi penerimaan'};
       await put('queue',q);
       if(!maySend())throw Object.assign(Error('Perekaman berakhir.'),{code:'EVIDENCE_EXPIRED'});
       let r;
@@ -452,7 +452,7 @@ function auditPage(){
      esc(p.name+' · '+p.employeeId)+'</option>').join('')+'</select></label>'+
    (items.map(r=>'<button class="card entry" data-act="auditRecord:'+esc(r.recordId)+'">'+icon('history')+
      '<span><b>'+esc(r.employeeName||r.employeeId)+'</b><small>'+esc(label(r.type)+' · '+r.decisions[0].at)+
-     (r.mobileTest?' · MODE UJI':'')+'</small></span>'+chip(label(r.verificationStatus),r.verificationStatus==='VERIFIED'?'green':'yellow')+'</button>').join('')||
+     (r.mobileTest?' · MODE UJI'+(r.testRunId?' · Sesi '+esc(r.testRunId.slice(0,8)):''):'')+'</small></span>'+chip(label(r.verificationStatus),r.verificationStatus==='VERIFIED'?'green':'yellow')+'</button>').join('')||
      empty(!audit?(navigator.onLine?'Menunggu data riwayat verifikasi.':'Hubungkan internet untuk memuat riwayat verifikasi.'):'Belum ada keputusan dalam tujuh hari ini.'));
 }
 function reviewIntro(r){
@@ -623,11 +623,43 @@ async function act(a){
      '<p>Durasi permintaan mencakup jaringan dan server. Satuan milidetik.</p>'+
      getTimings().map(sample=>'<p>'+esc(JSON.stringify(sample))+'</p>').join('') :
      '<p>Pengelola dapat mengaktifkan MHS_POC_PROFILE_ENABLED=YES, lalu menguji login ulang.</p>');break;
- case 'settings':modal('Pengaturan aplikasi','<div class="inline">'+btn('install','Pasang aplikasi','primary')+btn('password','Ubah password','secondary')+btn('probe','Uji koneksi API','secondary')+btn('performance','Durasi permintaan','secondary')+'</div>');break;
+ case 'settings':{
+   const current=session;
+   const buttons=btn('install','Pasang aplikasi','primary')+btn('password','Ubah password','secondary')+btn('probe','Uji koneksi API','secondary');
+   modal('Pengaturan aplikasi','<div class="inline" id="settings-actions">'+buttons+'</div>');
+   const controls=$('#settings-actions');
+   if(!navigator.onLine||current.role!=='EMPLOYEE')break;
+   const state=await api('TEST_SETTINGS');
+   if(current===session&&dialog.open&&controls.isConnected&&state.code==='TEST_READY')
+     controls.insertAdjacentHTML('beforeend',btn('resetTest:'+state.testRunId,'Reset Mobile Test','secondary')+btn('performance','Durasi permintaan','secondary'));
+   break;
+ }
+ case 'resetTest':
+   modal('Mulai sesi uji baru?','<p>Sesi '+esc(arg.slice(0,8))+' akan ditutup. Foto yang belum terkirim perlu direkam ulang. Catatan yang sudah diterima server tetap tersimpan.</p>'+btn('confirmReset:'+arg,'Ya, mulai sesi baru','primary')+btn('settings','Batal','secondary'));break;
+ case 'confirmReset':{
+   const current=session,owner=own();
+   const next=await api('RESET_MOBILE_TEST',{payload:{testRunId:arg}});
+   if(session!==current)break;
+   let pending=0;
+   for(const q of await owned('queue',owner)){
+     if(q.testRunId!==arg||q.confirmed||q.retired)continue;
+     if(session!==current)return;
+     try{
+       const receipt=await api('RECEIPT',{payload:{submissionId:q.id}});
+       if(receipt.recordId)await put('queue',receiptRow(q,receipt));
+       else if(receipt.code==='RECEIPT_NOT_FOUND')await remove('queue',q.id);
+       else pending++;
+     }catch{pending++;}
+   }
+   if(session!==current)break;
+   await local();render();
+   modal('Sesi uji baru siap','<p>Sesi '+esc(next.testRunId.slice(0,8))+' sudah aktif. Kamu bisa Check-in lagi hari ini.</p>'+(pending?'<p>Ada tanda terima yang masih menunggu pemeriksaan saat sinkronisasi.</p>':''));
+   scheduleSync(true,true);break;
+ }
  case 'probe':await probe();modal('Uji koneksi API','<p>✓ GET health terbaca.</p><p>✓ POST tanpa token menghasilkan SESSION_REQUIRED.</p><p>Transport siap diuji dengan akun pilot.</p>');break;
  case 'install':if(installEvent){await installEvent.prompt();installEvent=null}else toast('Buka menu browser → Instal aplikasi / Tambahkan ke layar utama.');break;
  case 'password':modal('Ubah password',passwordForm());break;
- case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.0.0</p>');break;
+ case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.1.0</p>');break;
  case 'help':modal('Bantuan & panduan','<p>Masuk saat online untuk memuat jadwal. Izinkan kamera dan GPS, kunci lokasi, lalu selesaikan tiga tantangan. Tinjau foto dan kirim dalam lima menit.</p><p>Buka tab Shift untuk detail harian atau tekan warna di Ringkasan Status untuk melihat riwayat.</p>');break;
  case 'logout':modal('Keluar dari aplikasi?','<p>Foto presensi yang belum dikirim akan dihapus saat perekaman ditutup.</p>'+btn('confirmLogout','Keluar','danger'));break;
  case 'confirmLogout':{let revoked=false;try{if(navigator.onLine){await api('LOGOUT');revoked=true}}finally{clearSession();toast(revoked?'Anda telah keluar.':'Sesi lokal ditutup. Sesi server berakhir sesuai masa berlakunya.')}break}

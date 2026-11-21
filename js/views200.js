@@ -74,7 +74,7 @@ export function lateCard(report,month,isVerifier,periodButton){
 export function previewCard(items,date){
   const list=date?items.filter(r=>r.shiftDate===date):items;
   if(!list.length)return '';
-  return '<section class="card" data-test-preview><h2>Simulasi presensi '+chip('MODE UJI')+'</h2>'+list.map(r=>'<div class="preview-row"><span>'+esc(r.shiftDate+' · '+(r.type==='CHECK_IN'?'Check-in':'Check-out')+' · '+r.localTime+' WIB')+'</span><b data-state="'+esc(r.finalStatus||(r.verificationStatus==='REJECTED'?'MERAH':'PENDING'))+'">'+
+  return '<section class="card" data-test-preview><h2>Simulasi presensi '+chip('MODE UJI')+'</h2>'+list.map(r=>'<div class="preview-row"><span>'+esc(r.shiftDate+' · '+(r.type==='CHECK_IN'?'Check-in':'Check-out')+' · '+r.localTime+' WIB'+(r.testRunId?' · Sesi '+r.testRunId.slice(0,8):''))+'</span><b data-state="'+esc(r.finalStatus||(r.verificationStatus==='REJECTED'?'MERAH':'PENDING'))+'">'+
     esc(({VERIFIED:'Disetujui',REJECTED:'Ditolak',PENDING:'Menunggu verifikasi',REVIEW:'Perlu rekonsiliasi',NEEDS_CORRECTION:'Perlu koreksi'})[r.verificationStatus]||r.verificationStatus)+
     esc(r.finalStatus?' · '+r.finalStatus:'')+'</b></div>').join('')+'</section>';
 }

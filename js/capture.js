@@ -80,9 +80,9 @@ export async function recordAttendance({dialog,title,type,call,send,alive,descri
     infoAt=performance.now();office=info.office;$('.office-name').textContent=office.name;
     banner.hidden=info.mobileTest!==true;
     if(info.mobileTest){
-      banner.textContent='MODE UJI — waktu dan GPS disimulasikan. Kamera serta tantangan wajah tetap wajib. Tidak dihitung sebagai presensi resmi.';
-      const isInside=info.gpsMode==='INSIDE';
-      fix={latitude:office.lat+(isInside?0:0.03),longitude:office.lon,gpsAccuracy:5,at:Date.now()};
+      banner.textContent=info.testRunId?'Uji developer · sesi '+info.testRunId.slice(0,8)+' · Jadwal virtual dan GPS simulasi. Selesaikan tiga tantangan kamera.':'Mobile Test · GPS simulasi. Jam presensi mengikuti jadwal kerja.';
+      if(!info.testFix)throw Error('Pembaruan kamera memerlukan backend 2.1.0.');
+      fix={...info.testFix,at:Date.now()};
       fixText.textContent='GPS SIMULASI (bukan lokasi ponsel)';
     }
     updateFix();
@@ -122,7 +122,7 @@ export async function recordAttendance({dialog,title,type,call,send,alive,descri
     phase='locking';lock.disabled=true;status.textContent='Memvalidasi posisi dengan server…';
     if(info.mobileTest)fix.at=Date.now();
     const measuredAt=Math.round(info.serverNow+(performance.now()-infoAt)-(Date.now()-fix.at));
-    const reply=await api('CAPTURE_LOCK',{type,scheduleId:info.scheduleId,shiftDate:info.shiftDate,
+    const reply=await api('CAPTURE_LOCK',{type,testRunId:info.testRunId,scheduleId:info.scheduleId,shiftDate:info.shiftDate,
       officeId:office.id,fix:{...fix,measuredAt}});
     if(!current()||phase!=='locking')return;
     lockState=reply;challengeEnd=performance.now()+reply.challengeEnds-reply.serverNow;
@@ -182,7 +182,7 @@ export async function recordAttendance({dialog,title,type,call,send,alive,descri
     phase='sending';submit.disabled=true;retake.hidden=true;sendStarted=true;status.textContent='Mengirim presensi…';
     try{
       const r=await send({id:lockState.submissionId,action:type,shiftDate:info.shiftDate,scheduleId:info.scheduleId,
-        at:Date.now(),photo:image.split(',')[1]},()=>current()&&phase==='sending'&&remaining()>0);
+        testRunId:info.testRunId,at:Date.now(),photo:image.split(',')[1]},()=>current()&&phase==='sending'&&remaining()>0);
       if(!current())return;
       phase='done';dispose();dialog.close();onAccepted(r);
     }catch(e){
