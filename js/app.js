@@ -24,6 +24,7 @@ const requestItems=()=>{
  for(const r of requestData?.items||[])byId.set(r.id,r);
  return [...byId.values()].sort((a,b)=>String(b.at).localeCompare(String(a.at)));
 };
+let recoverySession=null, recoveryAlerts=null;
 let verifierNetwork=Promise.resolve();
 const refreshScope=()=>session?.role==='VERIFIER'?((tab==='audit'?'audit':'queue')+period):period;
 let foregroundOffline = !navigator.onLine;
@@ -35,6 +36,15 @@ const refreshScheduler = createRefreshScheduler(
 const pending='Menunggu verifikasi', titles={home:'Beranda',history:'Riwayat',calendar:'Shift',audit:'Riwayat',doc:'Izin',user:'Profil',verify:'Verifikasi',stats:'Statistik'};
 const labels={PENDING:pending,VERIFIED:'Disetujui',REJECTED:'Ditolak',NEEDS_CORRECTION:'Perlu koreksi',CONFIRMED:'Terkirim',CHECK_IN:'Check-in',CHECK_OUT:'Check-out',CHECKIN:'Check-in',CHECKOUT:'Check-out'};
 const errors={TEST_RUN_CHANGED:'Sesi uji telah berganti. Buka ulang perekaman atau pengaturan.',DEVELOPER_FORBIDDEN:'Mode developer sudah ditutup untuk akun ini.',CORRECTION_CONFLICT:'Keputusan sudah berubah atau catatan belum selaras. Buka kembali Riwayat Verifikasi.',CORRECTION_WINDOW_CLOSED:'Keputusan sudah di luar periode koreksi tujuh hari.',POC_WRITE_DISABLED:'Presensi sementara belum dibuka oleh pengelola.',EVIDENCE_EXPIRED:'Bukti sudah kedaluwarsa. Rekam ulang presensi.',CHALLENGE_EXPIRED:'Waktu tantangan habis. Rekam ulang presensi.',CAPTURE_INVALID:'Sesi perekaman berakhir. Rekam ulang presensi.',LIVENESS_INCOMPLETE:'Hasil tantangan tidak lengkap atau melewati batas waktu. Rekam ulang presensi.',PHOTO_UNAVAILABLE:'Foto belum tersedia atau telah melewati masa simpan.',DUPLICATE_SHIFT_ACTION:'Transaksi ini sudah tercatat untuk shift yang sama.',PHOTO_MISMATCH:'Foto berbeda dari bukti yang dikonfirmasi.',GEOFENCE_REJECTED:'Lokasi atau akurasi belum memenuhi batas kantor.',EVIDENCE_REQUIRED:'Sesi bukti berakhir. Rekam ulang presensi.',INVALID_CREDENTIALS:'Username atau password tidak cocok.',API_DISABLED:'Pengelola perlu mengaktifkan API PoC.',SIMULATION_PANEL_ONLY:'Mode simulasi sidebar masih aktif.',MOBILE_TEST_CONFIG_INVALID:'Konfigurasi Mobile Test belum lengkap. Periksa Script Properties.',MOBILE_TEST_MODE_CHANGED:'Mode uji berubah saat perekaman. Rekam ulang.',TIME_WINDOW_CLOSED:'Jendela waktu absensi sudah tutup.',CHECKIN_REQUIRED_FOR_CHECKOUT:'Server belum menerima Check-in untuk shift ini.',SESSION_EXPIRED:'Sesi berakhir. Masuk kembali dengan akun yang sama.',REASON_REQUIRED:'Isi alasan minimal lima karakter.',PASSWORD_LENGTH:'Panjang password belum sesuai kebijakan yang ditampilkan.',PASSWORD_COMPLEXITY:'Gunakan minimal satu huruf, satu angka, dan satu simbol.',PASSWORD_CHANGE_REQUIRED:'Ganti password awal terlebih dahulu.',SCHEDULE_NOT_PUBLISHED:'Jadwal belum disetujui untuk absensi.',DEPENDENCY_UNAVAILABLE:'Modul aturan jadwal tidak tersedia di proyek Apps Script.'};
+Object.assign(errors,{
+  TOO_MANY_ATTEMPTS:'Batas percobaan tercapai. Coba lagi setelah 15 menit.',
+  RECOVERY_CONFLICT:'Status permintaan telah berubah. Tutup dialog dan perbarui antrean.',
+  RECOVERY_SETUP_REQUIRED:'Pemulihan belum siap. Hubungi Operator untuk memeriksa konfigurasi akun.',
+  RECOVERY_SERVICE_REQUIRED:'Hubungi Operator untuk mengaktifkan Google Sheets API pada proyek Apps Script.',
+  RECOVERY_EXPIRED:'Sesi pemulihan berakhir. Masuk kembali dengan kode aktif.',
+  PASSWORD_REUSED:'Pilih password baru yang berbeda dari password lama dan kode pemulihan.',
+  AUTH_RETRY_REQUIRED:'Layanan sedang sibuk. Coba kembali.'
+});
 const label=v=>labels[v]||v||'—';
 const wib=(d,opts)=>new Intl.DateTimeFormat('id-ID',{timeZone:'Asia/Jakarta',...opts}).format(d);
 const dateKey=d=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
@@ -49,10 +59,10 @@ const fmtDay=(s,opts={day:'numeric',month:'short',year:'numeric'})=>dateISO(s)?w
 const describe=e=>errors[e.code]||e.message||'Permintaan gagal.';
 const actNames=['CHECKIN','CHECKOUT'];
 function toast(t){$('#notice').textContent=t;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#notice').textContent='',6500)}
-function modal(title,body){$('#panel').innerHTML='<h2>'+esc(title)+'</h2>'+body+'<div id="feedback" role="status"></div>';if(!dialog.open)dialog.showModal()}
+function modal(title,body){delete $('#panel').dataset.privateRecovery;$('#panel').innerHTML='<h2>'+esc(title)+'</h2>'+body+'<div id="feedback" role="status"></div>';if(!dialog.open)dialog.showModal()}
 function report(e){const t=describe(e)+(e.code&&!['CONFIG','TRANSPORT'].includes(e.code)?' ('+e.code+')':'');if(dialog.open&&$('#feedback'))$('#feedback').innerHTML=msg(t);else if($('#form-error'))$('#form-error').innerHTML=msg(t);else toast(t)}
 function saveSession(){temporary.setItem(ns+'session',JSON.stringify(session))}
-function clearSession(){requestData=null;lateness=null;clearPreview();audit=null;auditEmployee='';reviewOpen=false;deciding=false;category='';dayReturn='';calendarDays=[];todayRows=[];expiredRows=[];epoch++;refreshScheduler.reset();photoGeneration++;setPhotoURL('');refreshError='';refreshDeferred=false;session=null;temporary.removeItem(ns+'session');rows=[];dailyRows=[];dailyMonth='';dailyLoaded=false;queue=[];drafts=[];verifier=[];loaded=false;lastSync=0;gpsAt=0;period='';filter='Semua';tab='home';if(dialog.open)dialog.close();render()}
+function clearSession(){recoverySession=null;recoveryAlerts=null;requestData=null;lateness=null;clearPreview();audit=null;auditEmployee='';reviewOpen=false;deciding=false;category='';dayReturn='';calendarDays=[];todayRows=[];expiredRows=[];epoch++;refreshScheduler.reset();photoGeneration++;setPhotoURL('');refreshError='';refreshDeferred=false;session=null;temporary.removeItem(ns+'session');rows=[];dailyRows=[];dailyMonth='';dailyLoaded=false;queue=[];drafts=[];verifier=[];loaded=false;lastSync=0;gpsAt=0;period='';filter='Semua';tab='home';if(dialog.open)dialog.close();render()}
 function valid(){return session&&Date.now()<session.expires}
 async function api(action,body={}){
   const current=session;
@@ -178,16 +188,16 @@ function login(){
   app.className='login';
   app.innerHTML='<div class="identity"><img src="./assets/icon-512.png" alt="Lambang Kabupaten Kotawaringin Timur"><h1>Absensi Kehadiran Outsourcing</h1><p>Kabupaten Kotawaringin Timur</p></div><form class="loginbox" id="login"><h2>Selamat Datang!</h2><p>Platform ini adalah sistem terintegrasi untuk mengelola presensi pegawai Kabupaten Kotawaringin Timur.</p><div class="fields"><label class="field">'+icon('user')+'<input name="username" aria-label="Username" placeholder="Username" autocomplete="username" required maxlength="40" value="'+esc(prefs.getItem(ns+'username')||'')+'"></label><label class="field">'+icon('lock')+'<input type="password" name="password" aria-label="Password" placeholder="Password" autocomplete="current-password" required maxlength="256"><button data-act="eye" type="button" aria-label="Tampilkan password">'+icon('eye')+'</button></label></div><div class="loginopts"><label><input type="checkbox" name="remember" '+(prefs.getItem(ns+'username')?'checked':'')+'> Ingat Saya</label>'+btn('forgot','Lupa Password?','link')+'</div><div id="form-error"></div><button class="primary full">'+icon('enter')+' Masuk</button></form>';
 }
-function passwordForm() {
-  const policy = session?.passwordPolicy || {minLength:8,maxLength:128};
-  return '<form id="password"><label class="formlabel">Password saat ini'+
-    '<input class="control" required name="oldPassword" type="password" autocomplete="current-password"></label>'+
+function passwordForm(reset=false) {
+  const policy = (reset?recoverySession:session)?.passwordPolicy || {minLength:8,maxLength:128};
+  return '<form id="'+(reset?'finish-recovery':'password')+'">'+(reset?'':'<label class="formlabel">Password saat ini'+
+    '<input class="control" required name="oldPassword" type="password" autocomplete="current-password"></label>')+
     '<label class="formlabel">Password baru · '+policy.minLength+'–'+policy.maxLength+' karakter'+
     '<input class="control" required minlength="'+policy.minLength+'" maxlength="'+policy.maxLength+
     '" name="newPassword" type="password" autocomplete="new-password"></label>'+
     '<small>Minimal satu huruf, satu angka, dan satu simbol. Huruf besar/kecil tetap dibedakan saat masuk.</small>'+
     '<label class="formlabel">Ulangi password baru<input class="control" required name="confirm" type="password" autocomplete="new-password"></label>'+
-    '<button class="primary full">Simpan password</button></form>';
+    '<button class="primary full">'+(reset?'Ganti Password':'Simpan password')+'</button></form>';
 }
 function periodButton(){return btn('period',icon('calendar')+' '+esc(fmtDay(period+'-01',{month:'short',year:'numeric'}))+' ⌄','period')}
 // Rekap harian hanya dihitung dari MY_DAILY, bukan dari transaksi yang diverifikasi satu per satu.
@@ -308,10 +318,24 @@ function profile(){
      menu('about','info','Tentang')+menu('help','doc','Bantuan &amp; Panduan'))+
    '<div class="profile-signout">'+menu('logout','enter','Log Out')+'</div>';
 }
+function recoveryQueueCard(){
+ if(!navigator.onLine) return card('Pemulihan password',empty('Hubungkan internet untuk melihat permintaan pemulihan.'));
+ if(!Array.isArray(recoveryAlerts)) return card('Pemulihan password',empty('Antrean pemulihan belum tersedia.'));
+ if(!recoveryAlerts.length) return card('Pemulihan password',empty('Tidak ada permintaan aktif.'));
+ return card('Permintaan pemulihan password',recoveryAlerts.map(r=>
+   '<div class="line"><span>Username <b>'+esc(r.username)+'</b><br>'+chip(r.status,r.ownApproval?'green':'yellow')+'</span>'+
+   (r.status==='MENUNGGU'||r.ownApproval?btn('reviewRecovery:'+esc(r.id),r.ownApproval?'Lihat kode':'Tinjau'):'')+'</div>').join(''));
+}
 function verification(){return '<h1>'+icon('shield')+' Verifikasi Absensi</h1><p class="subhead">Tinjau transaksi pilot yang menunggu keputusan.</p><div class="card wave between"><b>'+verifier.length+' transaksi dalam antrean</b><button data-act="sync" class="clock-refresh" aria-label="Perbarui antrean" title="Perbarui antrean">'+icon('refresh')+'</button></div>'+(!navigator.onLine?msg('Koneksi diperlukan untuk memuat dan memutuskan transaksi.'):'')+(verifier.map(r=>'<button class="card entry" data-review="'+esc(r.recordId)+'">'+icon('calendar')+'<span><b>'+esc(r.employeeName||'Nama pegawai belum tersedia')+' · '+esc(label(r.type))+'</b><small>'+esc(fmtDay(r.localDate))+(r.mobileTest?' · MODE UJI'+(r.testRunId?' · Sesi '+esc(r.testRunId.slice(0,8)):'')+' · GPS simulasi':'')+'</small></span>'+chip('Tinjau','yellow')+'</button>').join('')||card('Antrean verifikator',empty(loaded?'Tidak ada transaksi yang menunggu keputusan.':'Antrean pusat belum dimuat.')))+
-   (requestData?.reviewer?card('Permohonan pegawai',requestList(requestData.items,true)):'')}
+   recoveryQueueCard()+(requestData?.reviewer?card('Permohonan pegawai',requestList(requestData.items,true)):'')}
 function statisticsPage(){return '<h1>'+icon('bars')+' Statistik</h1>'+lateCard(lateness,period,true,periodButton)}
 function render(){
+ if(recoverySession){
+   app.className='login';
+   app.innerHTML='<section class="loginbox"><h1>Buat Password Baru</h1>'+passwordForm(true)+
+     '<div id="form-error" role="status"></div>'+btn('cancelRecovery','Kembali ke login','link')+'</section>';
+   return;
+ }
  if(!session){login();return}
  app.className='';
  if(session.mustChangePassword){app.innerHTML='<div class="shell"><div class="card"><h1>Ganti password awal</h1><p>Tetapkan password pribadi untuk melanjutkan.</p>'+passwordForm()+'<div id="form-error"></div>'+btn('logout','Log Out','link')+'</div></div>';return}
@@ -347,17 +371,18 @@ async function synchronize(manual=false){
    if(session!==s)return;
   }
   if (!navigator.onLine || session !== s) return;
-  const result = await api('REFRESH', {month:requestedMonth,verifierHistory:withAudit});
+  const result = await api('REFRESH', {clientApiVersion:'2.4.0',month:requestedMonth,verifierHistory:withAudit});
   if (session !== s) return;
   if (result.code !== 'REFRESH_READY' || !result.context) throw Error('Format pembaruan tidak valid.');
   applyContext(result.context);
-  if(result.apiVersion!=='2.3.0'||!result.requests)throw Error('Perbarui backend ke v2.3.0.');
+  if(!['2.3.0','2.4.0'].includes(result.apiVersion)||!result.requests)throw Error('Perbarui backend ke v2.4.0.');
   requestData=result.requests;lateness=result.lateness;
   if(requestedMonth===period&&navigator.onLine){
     clearPreview();preview=result.mobileTestPreview||[];previewMonth=requestedMonth;
     if(dialog.open&&dayReturn&&$('#panel .day-block'))showDay(dayReturn);
   }
   if (s.role === 'VERIFIER') {
+    recoveryAlerts=result.passwordRecovery??null;
     if (!Array.isArray(result.queue?.items)) throw Error('Format antrean tidak valid.');
     if(withAudit){
       if(!Array.isArray(result.history?.items)||!Array.isArray(result.history?.employees))
@@ -378,7 +403,7 @@ async function synchronize(manual=false){
   refreshError = '';
   if(manual&&session===s)toast(s.role==='EMPLOYEE'&&queue.length?'Antrean belum tuntas. Buka detail untuk melihat alasannya.':'Data pusat diperbarui.');
  } catch(e) {
-   if (session === s){clearPreview();if(s.role==='VERIFIER'){requestData=null;lateness=null;}refreshError = describe(e);}
+   if (session === s){clearPreview();if(s.role==='VERIFIER'){recoveryAlerts=null;requestData=null;lateness=null;}refreshError = describe(e);}
    if (manual) report(e);
  } finally {
    synchronizing = false;
@@ -617,7 +642,25 @@ async function act(a){
  if(['home','history','calendar','doc','user','verify','audit','stats'].includes(key)){const entering=tab!==key;category='';filter='Semua';dayReturn='';tab=key;render();window.scrollTo(0,0);if(entering&&['history','calendar','verify','audit','stats'].includes(key))scheduleSync(true);return}
  switch(key){
  case 'eye':{const p=$('[name=password]');p.type=p.type==='password'?'text':'password';$('[data-act=eye]').setAttribute('aria-label',p.type==='text'?'Sembunyikan password':'Tampilkan password');break}
- case 'forgot':modal('Lupa password?','<p>Hubungi operator Kabupaten Kotawaringin Timur untuk verifikasi identitas dan pengaturan ulang password akun.</p>');break;
+ case 'forgot':{
+   const username=$('#login [name=username]')?.value||'';
+   modal('Lupa Password?', '<form id="request-recovery"><label class="formlabel">Username pegawai'+
+     '<input class="control" name="username" required maxlength="40" autocomplete="username" value="'+esc(username)+'"></label>'+
+     '<button class="primary full">Kirim permintaan</button></form><p>Verifikator akan memeriksa identitas Anda dan menyampaikan kode secara pribadi. Anda juga bisa meminta kode langsung kepada Operator.</p>'+
+     '<p>Sudah punya kode? Tutup halaman ini dan masukkan kode di kolom Password saat login.</p>');
+   break;
+ }
+ case 'cancelRecovery':recoverySession=null;render();break;
+ case 'reviewRecovery':{
+   const r=recoveryAlerts?.find(item=>item.id===arg);
+   if(!r||!navigator.onLine)throw Error('Perbarui antrean saat online.');
+   modal('Pemulihan password',line('Username pegawai',esc(r.username))+
+     '<form id="review-recovery" data-id="'+esc(r.id)+'" data-username="'+esc(r.username)+'">'+
+     (r.ownApproval?'<p>Permintaan ini sudah Anda setujui.</p><button class="primary" value="REVEAL">Lihat kode aktif</button>':
+       '<p>Periksa identitas pemohon sebelum menyetujui penyerahan kode.</p>'+
+       '<button class="primary" value="APPROVE">Identitas sesuai · Setujui</button> <button class="secondary" value="REJECT">Tolak</button>')+'</form>');
+   break;
+ }
  case 'sync':await refreshScheduler.refresh(true);break;
  case 'category':category=arg;tab='history';dayReturn='';filter='Semua';render();window.scrollTo(0,0);scheduleSync(true);break;
  case 'monthMove':{
@@ -669,9 +712,9 @@ async function act(a){
  case 'security':
    modal('Keamanan Akun','<div class="security-symbol">'+icon('shield')+'</div>'+
      menu('password','lock','Ubah Password','Ganti password akun Anda')+
-     menu('recovery','shield','Lupa Password','Pemulihan melalui operator')+btn('backProfile','Kembali ke Profil','secondary'));break;
+     menu('recovery','shield','Lupa Password','Pengajuan dan kode pemulihan')+btn('backProfile','Kembali ke Profil','secondary'));break;
  case 'recovery':
-   modal('Lupa Password','<p>Hubungi operator Kabupaten Kotawaringin Timur untuk verifikasi identitas dan pengaturan ulang password akun.</p>'+btn('security','Kembali ke Keamanan Akun','secondary'));break;
+   modal('Lupa Password','<p>Di halaman login, pilih Lupa Password? atau hubungi Operator. Setelah identitas Anda diperiksa, masukkan kode yang diterima di kolom Password untuk membuat password baru.</p>'+btn('security','Kembali ke Keamanan Akun','secondary'));break;
  case 'backProfile':dialog.close();break;
  case 'settings':{
    const current=session;
@@ -709,7 +752,7 @@ async function act(a){
  case 'probe':await probe();modal('Uji koneksi API','<p>✓ GET health terbaca.</p><p>✓ POST tanpa token menghasilkan SESSION_REQUIRED.</p><p>Transport siap diuji dengan akun pilot.</p>');break;
  case 'install':if(installEvent){await installEvent.prompt();installEvent=null}else toast('Buka menu browser → Instal aplikasi / Tambahkan ke layar utama.');break;
  case 'password':modal('Ubah Password',passwordForm()+btn('security','Kembali ke Keamanan Akun','secondary'));break;
- case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.3.0</p>');break;
+ case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.4.0</p>');break;
  case 'help':modal('Bantuan & panduan','<p>Masuk saat online untuk memuat jadwal. Izinkan kamera dan GPS, kunci lokasi, lalu selesaikan tiga tantangan. Tinjau foto dan kirim dalam lima menit.</p><p>Buka tab Shift untuk detail harian atau tekan warna di Ringkasan Status untuk melihat riwayat.</p>');break;
  case 'logout':modal('Log Out dari aplikasi?','<p>Foto presensi yang belum dikirim akan dihapus saat perekaman ditutup.</p>'+btn('confirmLogout','Log Out','danger'));break;
  case 'confirmLogout':{let revoked=false;try{if(navigator.onLine){await api('LOGOUT');revoked=true}}finally{clearSession();toast(revoked?'Anda berhasil Log Out.':'Sesi lokal ditutup. Sesi server berakhir sesuai masa berlakunya.')}break}
@@ -737,12 +780,63 @@ document.addEventListener('submit',async e=>{
   case 'login':{
     if(!navigator.onLine)throw Error('Login memerlukan internet.');
     const r=await post('LOGIN',{username:input.username.trim(),password:input.password});
+    if(r.code==='RECOVERY_PASSWORD_REQUIRED'){
+      if(!r.recoveryToken)throw Error('Respons pemulihan tidak lengkap.');
+      f.elements.password.value='';
+      recoverySession={token:r.recoveryToken,passwordPolicy:r.passwordPolicy};
+      if(dialog.open)dialog.close();
+      render();break;
+    }
     if(!r.token||!['EMPLOYEE','VERIFIER'].includes(r.role)||!r.employeeId)throw Error('Identitas respons login tidak lengkap.');
     const expires=Date.parse(r.expiresAtWIB.replace(' ','T')+'+07:00');
     if(!Number.isFinite(expires)||expires<=Date.now())throw Error('Waktu sesi tidak valid. Periksa jam perangkat.');
     prefs.removeItem(ns+'username');if(input.remember)prefs.setItem(ns+'username',input.username.trim());
     f.elements.password.value='';session={token:r.token,expires,employeeId:r.employeeId,role:r.role,username:input.username.trim(),profession:r.profession,mustChangePassword:!!r.mustChangePassword};epoch++;saveSession();
     try{await start(r)}catch(err){clearSession();throw err}break}
+  case 'request-recovery':{
+    if(!navigator.onLine)throw Error('Sambungkan internet untuk mengirim permintaan, atau hubungi Operator.');
+    await post('RECOVERY_REQUEST',{username:input.username.trim()});
+    if(dialog.open && f.isConnected)modal('Permintaan diterima','<p>Jika akun memenuhi syarat, permintaan tersedia bagi Verifikator. Hubungi Verifikator untuk pemeriksaan identitas.</p>');
+    break;
+  }
+  case 'finish-recovery':{
+    const current=recoverySession;
+    if(!current)break;
+    if(input.newPassword!==input.confirm)throw Error('Konfirmasi password belum sesuai.');
+    if(!navigator.onLine)throw Error('Sambungkan internet sebelum menyimpan password baru.');
+    try{
+      await post('RECOVERY_FINISH',{recoveryToken:current.token,newPassword:input.newPassword});
+    }catch(err){
+      if(current!==recoverySession)break;
+      if(err.code==='RECOVERY_EXPIRED'){recoverySession=null;render();}
+      if(err.code==='TRANSPORT'||err.code==='SERVICE_ERROR'||err.code==='RECOVERY_EXPIRED')
+        throw Error('Hasil penyimpanan belum dapat dipastikan. Kembali ke login dan coba password baru. Jika belum diterima, gunakan kode aktif kembali.');
+      throw err;
+    }
+    if(current===recoverySession){recoverySession=null;render();toast('Password tersimpan. Masuk kembali dengan password baru.');}
+    break;
+  }
+  case 'review-recovery':{
+    if(f.dataset.busy)break;
+    const actor=session, decision=e.submitter?.value;
+    if(!decision || !navigator.onLine)throw Error('Pilih keputusan saat online.');
+    f.dataset.busy='1';
+    try{
+      const r=await api('RECOVERY_REVIEW',{username:f.dataset.username,id:f.dataset.id,decision});
+      if(actor!==session)break;
+      if(dialog.open && f.isConnected && !document.hidden){
+        if(r.code==='RECOVERY_APPROVED'){
+          modal('Kode pemulihan aktif',line('Username',esc(r.username))+line('Recovery Code',esc(r.recoveryCode))+
+            '<p>Sampaikan kode ini secara pribadi kepada pegawai yang identitasnya sudah Anda periksa.</p>');
+          $('#panel').dataset.privateRecovery='1';
+        }else{dialog.close();toast('Permintaan pemulihan ditolak.');}
+      }
+    }finally{
+      delete f.dataset.busy;
+      if(actor===session)scheduleSync(true,true);
+    }
+    break;
+  }
   case 'photo-form': {
     const current = session, owner = own(), generation = ++photoGeneration;
     const blob = await preparePhoto(f.elements.photo.files[0]);
@@ -808,11 +902,12 @@ window.addEventListener('offline', () => {
 });
 window.addEventListener('beforeinstallprompt', e => {e.preventDefault();installEvent=e});
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) refreshScheduler.pause();
+  if (document.hidden) {if(dialog.open && $('#panel').dataset.privateRecovery)dialog.close();refreshScheduler.pause();}
   else if (session) scheduleSync();
 });
 dialog.addEventListener('cancel',e=>{if(deciding)e.preventDefault();});
 dialog.addEventListener('close', () => {
+  if(!dialog.open && $('#panel').dataset.privateRecovery){$('#panel').replaceChildren();delete $('#panel').dataset.privateRecovery;}
   if(!dialog.open){dialog.classList.remove('review-modal');delete dialog.dataset.record;}
   if(!dialog.open&&reviewOpen){reviewOpen=false;scheduleSync();}
   if (!dialog.open){const proof=$('#review-proof');if(proof)proof.replaceChildren();}
