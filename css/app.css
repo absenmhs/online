@@ -1125,3 +1125,37 @@ dialog.recording{
   padding:9px 15px;
   margin-top:11px;
 }
+
+/* v2.3.0 HF3 — larger, legible two-choice Izin / Insiden entry. */
+.shell h1.request-page-heading {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  font-size:clamp(19px,5.5vw,24px);
+  letter-spacing:-.55px;
+  line-height:1.25;
+  margin-bottom:15px;
+}
+.request-page-heading .icon { flex:0 0 auto; }
+.request-page-heading span { min-width:0; }
+.request-entry-actions { gap:10px; }
+.request-entry-actions .request-entry-button {
+  min-height:66px;
+  padding:12px 10px;
+  gap:9px;
+  font-size:clamp(19px,5.4vw,23px);
+  font-weight:850;
+  line-height:1.1;
+  letter-spacing:.15px;
+  white-space:nowrap;
+}
+.request-entry-actions .request-entry-button .icon {
+  width:1.12em;
+  height:1.12em;
+}
+@media(max-width:350px){
+  /* Short labels fit at 320px too; no need to stack the two actions. */
+  .request-entry-actions { grid-template-columns:repeat(2,minmax(0,1fr));gap:7px; }
+  .request-entry-actions .request-entry-button { padding-inline:5px;gap:5px;font-size:19px; }
+  .shell h1.request-page-heading { font-size:19px; }
+}

@@ -27,11 +27,11 @@ export function requestList(items,review=false){
     '</small><span>'+esc((r.scope==='MOBILE_TEST'?'MODE UJI · ':'')+(stages[r.status]||r.status)+(r.issue?' · Perlu ditinjau':''))+'</span></button>').join('');
 }
 export function leavePage({data,items,day,registered,fmtDay}){
-  return '<h1>'+icon('doc')+' Izin</h1><section class="card request-info"><div>'+icon('calendar')+
+  return '<h1 class="request-page-heading">'+icon('doc')+' <span>Pelaporan Izin dan Insiden</span></h1><section class="card request-info"><div>'+icon('calendar')+
     '<small>Izin Bulan Ini</small><b>'+(data?.month===day.slice(0,7)?esc(data.approvedDays)+' hari':'—')+'</b>'+
     '<small>'+esc(fmtDay(day,{month:'long',year:'numeric'}))+'</small></div><div><small>Terdaftar Sejak</small><b>'+
     esc(accountAge(registered,day)||'Belum tersedia')+'</b><small>'+esc(registered?fmtDay(registered):'')+'</small></div></section>'+
-    '<div class="two request-entry-actions">'+btn('newdraft',requestNames.LEAVE,'primary request-entry-button','doc')+btn('incident',requestNames.INCIDENT,'danger request-entry-button request-incident-button','shield')+'</div>'+
+    '<div class="two request-entry-actions">'+btn('newdraft','IZIN','primary request-entry-button','doc')+btn('incident','INSIDEN','danger request-entry-button request-incident-button','shield')+'</div>'+
     card('Riwayat permohonan',requestList(items));
 }
 export function requestForm(kind,d={},today,test=false){
