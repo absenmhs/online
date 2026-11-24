@@ -165,7 +165,7 @@ async function local(){
   if(stamp!==epoch||period!==month)return;
   const receipts=new Map(q.filter(x=>x.confirmed).map(x=>[x.receipt,x]));
   if(session.role==='EMPLOYEE')requestData=cached?.requests||null;
-  if(session.role==='EMPLOYEE')lateness=cached?.dailyMonths?.[period]?.lateness||null;
+  if(session.role==='EMPLOYEE')lateness=cached?.dailyMonths?.[period]?.scope250?cached.dailyMonths[period].lateness:null;
   const cachedQueue=cached?.verifier;
   loaded=Array.isArray(cachedQueue)&&cachedQueue.every(r=>typeof r.mobileTest==='boolean');
   verifier=loaded?cachedQueue:[];
@@ -371,11 +371,11 @@ async function synchronize(manual=false){
    if(session!==s)return;
   }
   if (!navigator.onLine || session !== s) return;
-  const result = await api('REFRESH', {clientApiVersion:'2.4.0',month:requestedMonth,verifierHistory:withAudit});
+  const result = await api('REFRESH', {clientApiVersion:'2.5.1',month:requestedMonth,verifierHistory:withAudit});
   if (session !== s) return;
   if (result.code !== 'REFRESH_READY' || !result.context) throw Error('Format pembaruan tidak valid.');
   applyContext(result.context);
-  if(!['2.3.0','2.4.0'].includes(result.apiVersion)||!result.requests)throw Error('Perbarui backend ke v2.4.0.');
+  if(result.apiVersion!=='2.5.1'||!result.requests)throw Error('Perbarui backend ke v2.5.1.');
   requestData=result.requests;lateness=result.lateness;
   if(requestedMonth===period&&navigator.onLine){
     clearPreview();preview=result.mobileTestPreview||[];previewMonth=requestedMonth;
@@ -396,7 +396,7 @@ async function synchronize(manual=false){
         !Array.isArray(status?.items)) throw Error('Format rekap harian server tidak valid.');
     const previous = await get('status',owner), months = {...(previous?.dailyMonths || {})};
     if(!Array.isArray(daily.calendar))throw Error('Backend Kalender Shift belum diperbarui ke v1.8.0.');
-    months[requestedMonth] = {scope200:true,lateness:result.lateness,items:daily.items,calendar:daily.calendar,transactions:status.items,at:Date.now()};
+    months[requestedMonth] = {scope200:true,scope250:true,lateness:result.lateness,items:daily.items,calendar:daily.calendar,transactions:status.items,at:Date.now()};
     await put('status',{owner,requests:result.requests,scope200:true,todayRows:status.todayRows||[],items:status.items,at:Date.now(),dailyMonths:months});
   }
   if (session !== s) return;
@@ -752,7 +752,7 @@ async function act(a){
  case 'probe':await probe();modal('Uji koneksi API','<p>✓ GET health terbaca.</p><p>✓ POST tanpa token menghasilkan SESSION_REQUIRED.</p><p>Transport siap diuji dengan akun pilot.</p>');break;
  case 'install':if(installEvent){await installEvent.prompt();installEvent=null}else toast('Buka menu browser → Instal aplikasi / Tambahkan ke layar utama.');break;
  case 'password':modal('Ubah Password',passwordForm()+btn('security','Kembali ke Keamanan Akun','secondary'));break;
- case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.4.0</p>');break;
+ case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.5.1</p>');break;
  case 'help':modal('Bantuan & panduan','<p>Masuk saat online untuk memuat jadwal. Izinkan kamera dan GPS, kunci lokasi, lalu selesaikan tiga tantangan. Tinjau foto dan kirim dalam lima menit.</p><p>Buka tab Shift untuk detail harian atau tekan warna di Ringkasan Status untuk melihat riwayat.</p>');break;
  case 'logout':modal('Log Out dari aplikasi?','<p>Foto presensi yang belum dikirim akan dihapus saat perekaman ditutup.</p>'+btn('confirmLogout','Log Out','danger'));break;
  case 'confirmLogout':{let revoked=false;try{if(navigator.onLine){await api('LOGOUT');revoked=true}}finally{clearSession();toast(revoked?'Anda berhasil Log Out.':'Sesi lokal ditutup. Sesi server berakhir sesuai masa berlakunya.')}break}

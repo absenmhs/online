@@ -6,7 +6,7 @@ export function summarizeDaily(days){
   if(codes.includes(d.finalStatus))totals[d.finalStatus]++;
   else totals.unverified++;
   if(d.partialReason==='PARTIAL_NO_CHECKOUT'&&d.finalStatus==='KUNING')totals.partialA++;
-  if(d.partialReason==='PARTIAL_REJECTED'&&d.finalStatus==='KUNING')totals.partialB++;
+  if(['PARTIAL_REJECTED','PARTIAL_NO_VALID_CHECKIN'].includes(d.partialReason)&&d.finalStatus==='KUNING')totals.partialB++;
   if(d.absenceReason==='ABSENT_NO_ACTIVITY'&&d.finalStatus==='MERAH')totals.absenceA++;
   if(d.absenceReason==='ABSENT_CHECKIN_REJECTED'&&d.finalStatus==='MERAH')totals.absenceB++;
  }
@@ -14,6 +14,7 @@ export function summarizeDaily(days){
 }
 export function dayExplanation(day){
  if(!day)return 'Belum tercatat';
+ if(day.partialReason==='PARTIAL_NO_VALID_CHECKIN')return 'Hadir sebagian · Hanya Check-out terverifikasi';
  if(day.partialReason==='PARTIAL_NO_CHECKOUT')return 'Hadir sebagian A · Tidak Check-out';
  if(day.partialReason==='PARTIAL_REJECTED')return 'Hadir sebagian B · Ditolak verifikator';
  if(day.partialReason==='PARTIAL_VERIFIER_ASSESSED')return 'Hadir sebagian · Penilaian verifikator';

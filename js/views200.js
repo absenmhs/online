@@ -45,9 +45,9 @@ export function requestForm(kind,d={},today,test=false){
 }
 export function requestDetail(r,review){
   const id=esc(encodeURIComponent(r.id)),pending=r.status==='PENDING';
-  const incident=r.kind==='INCIDENT',correction=incident&&['APPROVED','REJECTED'].includes(r.status);
+  const incident=r.kind==='INCIDENT',correction=['APPROVED','REJECTED'].includes(r.status);
   const decisions=(r.history||[]).map(e=>'<li><b>'+esc(e.prior+' → '+e.decision)+'</b><small>'+
-    esc('Revisi '+e.revision+' · '+e.actor+' · '+e.at+' WIB')+'</small><p>'+esc(e.reason||'Tanpa catatan tambahan')+'</p></li>').join('');
+    esc('Revisi '+e.revision+' · '+e.actor+' · '+e.at+' WIB')+'</small><p>'+esc((incident&&e.decision==='APPROVED'?({DAY:'Seluruh shift',CHECK_IN:'Check-in',CHECK_OUT:'Check-out'}[e.coverage||'DAY'])+' · ':'')+(e.reason||'Tanpa catatan tambahan'))+'</p></li>').join('');
   return (r.scope==='MOBILE_TEST'?chip('MODE UJI','yellow'):'')+line('Status',esc(stages[r.status]||r.status))+line('Tanggal',esc(r.day+(r.end!==r.day?' – '+r.end:'')))+
     '<p class="prose-request">'+esc(r.reason)+'</p>'+(incident?line('Jenis',esc(r.requestType||'Insiden')):'')+
     (r.at&&typeof r.at==='string'?line('Diajukan',esc(r.at)+' WIB'):'')+
@@ -57,26 +57,35 @@ export function requestDetail(r,review){
     (r.status==='DRAFT'?btn('editRequest:'+id,'Buka draf','primary')+' '+btn('deleteDraft:'+id,'Hapus draf','secondary'):'')+
     (r.status==='QUEUED'?btn('resendRequest','Periksa pengiriman','primary'):'')+
     ((pending||correction)&&review&&(!incident||Number.isInteger(r.revision))?'<form id="request-decision" data-id="'+id+'" data-revision="'+esc(r.revision||0)+'"><label class="formlabel">'+(correction?'Koreksi keputusan':'Keputusan')+'<select name="decision">'+
-    (r.status!=='APPROVED'?'<option value="APPROVED">Setujui</option>':'')+(r.status!=='REJECTED'?'<option value="REJECTED">Tolak</option>':'')+
-    '</select></label><label class="formlabel">'+(correction?'Alasan koreksi':'Catatan keputusan')+'<textarea name="notes" maxlength="500" rows="2" '+(incident||correction?'required minlength="5"':'')+'></textarea></label><button class="primary full">Simpan keputusan</button></form>':
+    (r.status!=='APPROVED'||incident?'<option value="APPROVED">Setujui</option>':'')+(r.status!=='REJECTED'?'<option value="REJECTED">Tolak</option>':'')+
+    '</select></label>'+(incident?'<label class="formlabel">Cakupan jika disetujui<select name="coverage">'+
+    [['DAY','Seluruh shift'],['CHECK_IN','Hanya Check-in'],['CHECK_OUT','Hanya Check-out']].map(([value,label])=>'<option value="'+value+'"'+((r.history||[]).slice(-1)[0]?.coverage===value?' selected':'')+'>'+label+'</option>').join('')+'</select></label>':'')+'<label class="formlabel">'+(correction?'Alasan koreksi':'Catatan keputusan')+'<textarea name="notes" maxlength="500" rows="2" '+(incident||correction?'required minlength="5"':'')+'></textarea></label><button class="primary full">Simpan keputusan</button></form>':
     pending&&!review?btn('cancelRequest:'+id,'Batalkan permohonan','secondary'):'');
 }
+function periodLabel251(r){
+  if(r.isFinal===true)return 'Final';
+  const reasons=r.finalityReasons||[];
+  if(reasons.includes('WINDOW_OPEN'))return 'Sementara · jendela presensi belum ditutup';
+  if(reasons.includes('BORDER_UNKNOWN'))return 'Sementara · batas waktu belum lengkap';
+  if(reasons.includes('DATA_REVIEW')||reasons.includes('SCHEDULE_UNVERIFIED'))return 'Sementara · data perlu ditinjau';
+  return 'Sementara · belum semua tanggal kerja final';
+}
 export function lateCard(report,month,isVerifier,periodButton){
-  const title='Keterlambatan',choose=isVerifier?periodButton():'';
+  const title='Kedisiplinan bulanan',choose=isVerifier?periodButton():'';
   const head='<div class="between"><h2>'+icon('bars')+' '+title+'</h2>'+choose+'</div>';
   let body;
   if(!report||report.month!==month||report.unavailable)body=empty('Data keterlambatan belum tersedia.');
   else if(!isVerifier){
     const r=report.items[0];
-    body=!r||!r.measured&&!r.missing?empty('Belum ada transaksi terverifikasi yang dapat dihitung.'):
+    body=!r?empty('Belum ada data untuk periode ini.'):
       line('Terlambat Check-in',r.checkin==null?'—':esc(r.checkin)+' menit')+line('Selisih Check-out',r.checkout==null?'—':esc(r.checkout)+' menit')+
-      line('Klasifikasi',esc(r.classification||'Belum lengkap'))+(r.missing?'<small>'+esc(r.missing)+' transaksi menunggu batas waktu historis.</small>':'');
+      line('Ekuivalensi alpa / parsial',r.equivalence==null?'—':esc(r.equivalence)+' menit')+line('Total Late_Count',r.discipline==null?'—':esc(r.discipline)+' menit')+line('Klasifikasi bulanan',esc(r.classification||'Belum lengkap'))+line('Status periode',esc(periodLabel251(r)))+(r.missing?'<small>'+esc(r.missing)+' transaksi menunggu batas waktu historis.</small>':'')+(r.waiting?'<small> · '+esc(r.waiting)+' tanggal menunggu finalisasi.</small>':'');
   }else{
     const top=Math.max(4,4*Math.ceil(Math.max(0,...report.items.map(r=>r.discipline||0))/4));
-    body='<small>Menit disiplin dari Check-in · '+esc(month)+'</small><div class="chart-scroll" tabindex="0" aria-label="Grafik menit per pegawai"><div class="late-bars"><div class="chart-axis"><small>Menit</small><div>'+[top,top*3/4,top/2,top/4,0].map(n=>'<span>'+n+'</span>').join('')+'</div></div>'+
-      report.items.map(r=>'<div class="late-col" title="'+esc(r.name)+'"><b>'+esc(r.discipline??'—')+'</b><div class="bar-track"><i data-class="'+esc(r.classification)+'" style="height:'+(100*(r.discipline||0)/top)+'%"></i></div><strong>'+esc(r.employeeId)+'</strong><small>'+esc(r.name)+'</small><small>'+esc(r.classification||(r.missing?'Belum lengkap':'Belum ada data'))+'</small></div>').join('')+'</div></div>';
+    body='<small>Total Late_Count dari tanggal kerja final · '+esc(month)+'</small><div class="chart-scroll" tabindex="0" aria-label="Grafik menit per pegawai"><div class="late-bars"><div class="chart-axis"><small>Menit</small><div>'+[top,top*3/4,top/2,top/4,0].map(n=>'<span>'+n+'</span>').join('')+'</div></div>'+
+      report.items.map(r=>'<div class="late-col" title="'+esc(r.name)+'"><b>'+esc(r.discipline??'—')+'</b><div class="bar-track"><i data-class="'+esc(r.classification)+'" style="height:'+(100*(r.discipline||0)/top)+'%"></i></div><strong>'+esc(r.employeeId)+'</strong><small>'+esc(r.name)+'</small><small>'+esc((r.classification||(r.missing?'Belum lengkap':'Belum ada data'))+(r.waiting?' · '+r.waiting+' belum final':''))+'</small><small>'+esc(periodLabel251(r))+'</small></div>').join('')+'</div></div>';
   }
-  return '<section class="card">'+head+body+'</section>';
+  return '<section class="card">'+head+body+(report?.rollupEnabled===false?'<small>Sinkronisasi rekap harian dan bulanan dinonaktifkan.</small>':'')+'</section>';
 }
 export function previewCard(items,date){
   const list=date?items.filter(r=>r.shiftDate===date):items;
