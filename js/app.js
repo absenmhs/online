@@ -40,6 +40,7 @@ Object.assign(errors,{
   TOO_MANY_ATTEMPTS:'Batas percobaan tercapai. Coba lagi setelah 15 menit.',
   RECOVERY_CONFLICT:'Status permintaan telah berubah. Tutup dialog dan perbarui antrean.',
   RECOVERY_SETUP_REQUIRED:'Pemulihan belum siap. Hubungi Operator untuk memeriksa konfigurasi akun.',
+  FINAL_STATUS_CONFLICT:'Status warna tidak boleh dipilih manual. Perbarui aplikasi dan kirim keputusan Setuju/Tolak saja.',
   RECOVERY_SERVICE_REQUIRED:'Hubungi Operator untuk mengaktifkan Google Sheets API pada proyek Apps Script.',
   RECOVERY_EXPIRED:'Sesi pemulihan berakhir. Masuk kembali dengan kode aktif.',
   PASSWORD_REUSED:'Pilih password baru yang berbeda dari password lama dan kode pemulihan.',
@@ -202,7 +203,7 @@ function passwordForm(reset=false) {
 function periodButton(){return btn('period',icon('calendar')+' '+esc(fmtDay(period+'-01',{month:'short',year:'numeric'}))+' ⌄','period')}
 // Rekap harian hanya dihitung dari MY_DAILY, bukan dari transaksi yang diverifikasi satu per satu.
 function summary(){return summarizeDaily(dailyMonth===period?dailyRows:[])}
-// Backend retains MERAH for legacy Daily_Attendance and verifier contracts.
+// Backend retains MERAH for legacy Daily_Attendance. Verifier only judges proof; no manual color.
 // Calendar/dashboard use the six-color UI palette; do not reuse Late Count colors.
 const colours=['HIJAU','KUNING','MERAH','BIRU','COKELAT'],colourText=['Hadir lengkap','Hadir sebagian','Tidak hadir','Izin resmi','Insiden'];
 const calendarVisualState=state=>state==='MERAH'?'GRAY':state;
@@ -569,11 +570,9 @@ async function loadProof(id){
 
 function decisionForm(r,opposite=''){
  const choices=opposite?[opposite]:['VERIFIED','REJECTED','NEEDS_CORRECTION'];
- const reject=opposite==='REJECTED';
- return '<form id="decision" data-id="'+esc(r.recordId)+'" '+(opposite?'data-base="'+esc(r.baseDecisionId)+'"':'')+'>'+
+  return '<form id="decision" data-id="'+esc(r.recordId)+'" '+(opposite?'data-base="'+esc(r.baseDecisionId)+'"':'')+'>'+
    '<label class="formlabel">Keputusan<select name="verdict">'+choices.map(v=>'<option value="'+v+'">'+esc(label(v))+'</option>').join('')+
-   '</select></label><label class="formlabel" id="colorlabel" '+(reject?'hidden':'')+'>Status akhir<select name="color">'+
-   colours.map((c,i)=>'<option value="'+c+'">'+c+' · '+colourText[i]+'</option>').join('')+'</select></label>'+
+   '</select></label>'+
    '<label class="formlabel">'+(opposite?'Alasan koreksi':'Catatan')+'<textarea rows="3" name="notes" maxlength="500" '+
    (opposite?'required minlength="5"':'')+'></textarea></label>'+
    '<button class="primary full">'+(opposite?'Simpan koreksi':'Simpan keputusan')+'</button></form>';
@@ -782,7 +781,7 @@ document.addEventListener('click',async e=>{
 document.addEventListener('change',e=>{
  if(e.target.id==='audit-employee'){auditEmployee=e.target.value;render();return;}
  if(e.target.name==='verdict'){
- const hide=e.target.value!=='VERIFIED',required=hide||!!e.target.form.dataset.base;$('#colorlabel').hidden=hide;const notes=e.target.form.elements.notes;notes.required=required;notes.minLength=required?5:0;
+ const required=e.target.value!=='VERIFIED'||!!e.target.form.dataset.base;const notes=e.target.form.elements.notes;notes.required=required;notes.minLength=required?5:0;
 }});
 document.addEventListener('submit',async e=>{
  e.preventDefault();const f=e.target, input=Object.fromEntries(new FormData(f)), b=e.submitter||f.querySelector('button:not([type=button])');
@@ -868,7 +867,7 @@ document.addEventListener('submit',async e=>{
     const current=session;
     if(deciding||!navigator.onLine)throw Error('Sambungkan internet untuk menyimpan keputusan.');
     let request={recordId:f.dataset.id,verificationStatus:input.verdict,
-      finalStatus:input.verdict==='VERIFIED'?input.color:'',notes:(input.notes||'').trim()};
+      notes:(input.notes||'').trim()};
     if(f.dataset.base)request.baseDecisionId=f.dataset.base;
     if(f.id==='repair'){
       const row=audit?.items.find(r=>r.recordId===f.dataset.id),head=row?.decisions[0];
