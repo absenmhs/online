@@ -252,8 +252,10 @@ function dashboard(){
    '<div class="two">'+actions+'</div>'+(session.writeOpen===false?msg('Presensi sementara belum dibuka oleh pengelola.'):'')+
    card(icon('calendar')+' Status Absensi Hari Ini',todayLines)+backlog()+
    card(icon('bars')+' Ringkasan Status','<div class="five">'+counts+'</div>')+
-   '<div class="three">'+btn('history','Riwayat<br>Absensi','tile','history')+btn('newdraft','Pengajuan<br>Izin','tile','doc')+btn('incident','Laporan<br>Insiden','tile','shield')+'</div>'+
-   lateCard(lateness,period,false,periodButton,{mode:latePersonalMode})+card(icon('history')+' Riwayat Terakhir',byPeriod().slice(0,2).map(r=>line(esc(fmtDay(r.localDate))+' · '+esc(label(r.type)),esc(label(r.verificationStatus)))).join('')||empty('Belum ada transaksi pada periode ini.'));
+   lateCard(lateness,period,false,periodButton,{mode:latePersonalMode})+
+   card(icon('history')+' Riwayat Terakhir',
+     (byPeriod().slice(0,2).map(r=>line(esc(fmtDay(r.localDate))+' · '+esc(label(r.type)),esc(label(r.verificationStatus)))).join('')||empty('Belum ada transaksi pada periode ini.'))+
+     btn('history','Lihat Semua Riwayat','link'));
 }
 function history(){
  const days=category?dailyRows.filter(d=>d.finalStatus===category):dailyRows;
@@ -803,7 +805,7 @@ async function act(a){
  case 'probe':await probe();modal('Uji koneksi API','<p>✓ GET health terbaca.</p><p>✓ POST tanpa token menghasilkan SESSION_REQUIRED.</p><p>Transport siap diuji dengan akun pilot.</p>');break;
  case 'install':if(installEvent){await installEvent.prompt();installEvent=null}else toast('Buka menu browser → Instal aplikasi / Tambahkan ke layar utama.');break;
  case 'password':modal('Ubah Password',passwordForm()+btn('security','Kembali ke Keamanan Akun','secondary'));break;
- case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.5.6 · HF6</p>');break;
+ case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.5.7 · HF7</p>');break;
  case 'help':modal('Bantuan & panduan','<p>Masuk saat online untuk memuat jadwal. Izinkan kamera dan GPS, kunci lokasi, lalu selesaikan tiga tantangan. Tinjau foto dan kirim dalam lima menit.</p><p>Buka tab Shift untuk detail harian atau tekan warna di Ringkasan Status untuk melihat riwayat.</p>');break;
  case 'logout':modal('Log Out dari aplikasi?','<p>Foto presensi yang belum dikirim akan dihapus saat perekaman ditutup.</p>'+btn('confirmLogout','Log Out','danger'));break;
  case 'confirmLogout':{let revoked=false;try{if(navigator.onLine){await api('LOGOUT');revoked=true}}finally{clearSession();toast(revoked?'Anda berhasil Log Out.':'Sesi lokal ditutup. Sesi server berakhir sesuai masa berlakunya.')}break}
