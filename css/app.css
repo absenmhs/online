@@ -867,9 +867,18 @@ button:hover {
 .cal-day em{font-size:.62rem;font-weight:700;font-style:normal}
 .cal-day small{font-size:clamp(10px,2.65vw,12px);white-space:nowrap}
 .cal-day[aria-current=date]{outline:2px solid #146dc0;outline-offset:-2px}
-[data-state=HIJAU]{background:#ceefdf;color:#104d38}[data-state=KUNING]{background:#ffedb2;color:#624910}
-[data-state=MERAH]{background:#ffd6d8;color:#7a232d}[data-state=BIRU]{background:#cee5ff;color:#19477c}
-[data-state=COKELAT]{background:#e9ceba;color:#532f20}[data-state=HOLIDAY]{background:#e2def3;color:#4c4072}
+/* Calendar-only palette: MERAH is a legacy backend code, rendered as GRAY.
+   This must never affect .bar-track[data-class] used by Late Count. */
+.cal-day[data-state=HIJAU],.cal-palette-swatch[data-state=HIJAU]{background:#ceefdf;color:#104d38}
+.cal-day[data-state=KUNING],.cal-palette-swatch[data-state=KUNING]{background:#ffedb2;color:#624910}
+.cal-day[data-state=GRAY],.cal-day[data-state=MERAH],.cal-palette-swatch[data-state=GRAY]{background:#414b56;color:#fff;border-color:#414b56}
+.cal-day[data-state=BIRU],.cal-palette-swatch[data-state=BIRU]{background:#cee5ff;color:#19477c}
+.cal-day[data-state=COKELAT],.cal-palette-swatch[data-state=COKELAT]{background:#e9ceba;color:#532f20}
+.cal-day[data-state=HOLIDAY],.cal-palette-swatch[data-state=HOLIDAY]{background:#e2def3;color:#4c4072}
+.cal-palette{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px 9px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
+.cal-palette-item{display:flex;align-items:center;gap:5px;min-width:0;font-size:clamp(10px,2.7vw,12px);line-height:1.25;color:#37485a}
+.cal-palette-swatch{display:inline-block;flex:0 0 12px;width:12px;height:12px;border:1px solid #adb8c5;border-radius:3px}
+@media(max-width:350px){.cal-palette{grid-template-columns:repeat(2,minmax(0,1fr))}}
 [data-state=UNSCHEDULED]{background:#fff;color:#647486;border-style:dashed}
 [data-state=UPCOMING]{background:#eef5fa;color:#2e5167}[data-state=UNFINALIZED]{background:#e1e6e9;color:#384856}
 [data-state=PENDING]{background:#ffe0be;color:#70461d}[data-state=IN_PROGRESS]{background:#caecee;color:#1c5159}
@@ -996,166 +1005,3 @@ dialog.recording{
 .security-symbol .icon{width:36px;height:36px}
 .incident-history{padding-left:1.4rem}.incident-history li{margin-bottom:.7em}.incident-history small{display:block}
 .incident-history p{margin:.2em 0;white-space:pre-wrap;overflow-wrap:anywhere}
-
-
-/* HF1 v2.3.0 — Profil compact legible + verifier navigation */
-.profile-group { margin:20px 0 22px; }
-.profile-group h2 {
-  margin:0 0 10px;
-  font-size:clamp(14px,3.7vw,16px);
-  line-height:1.3;
-  font-weight:800;
-  letter-spacing:.35px;
-  text-transform:uppercase;
-  color:#45617d;
-}
-.profile-group .menu, .profile-signout .menu {
-  min-height:64px;
-  padding:13px 16px;
-  gap:15px;
-  border-radius:19px;
-  margin-bottom:9px;
-}
-.profile-group .menu>.icon,.profile-signout .menu>.icon {
-  font-size:26px;
-}
-.profile-group .menu b,.profile-signout .menu b {
-  font-size:clamp(16px,4.15vw,18px);
-  font-weight:750;
-  line-height:1.24;
-  letter-spacing:-.22px;
-}
-.profile-signout { margin:20px 0 4px; }
-/* Slot controls for Koneksi & Sinkronisasi: no more uneven wrapping and massive gaps. */
-#settings-actions {
-  display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:9px;
-  margin:14px 0 3px;
-}
-#settings-actions>button {
-  min-width:0;
-  width:100%;
-  min-height:46px;
-  margin:0;
-  padding:9px 10px;
-  font-size:clamp(13px,3.7vw,15px);
-  line-height:1.25;
-  text-align:center;
-  white-space:normal;
-}
-#settings-actions>button:first-child { grid-column:1 / -1; }
-#settings-actions>button:nth-child(4) { grid-column:1 / -1; }
-#dialog:has(#settings-actions) #close { min-width:116px; margin-top:12px; }
-@media(max-width:355px){
-  #settings-actions { grid-template-columns:minmax(0,1fr); }
-  #settings-actions>button { grid-column:1 / -1; }
-}
-/* All four verifier tabs have equal tappable surface and readable labels. */
-.nav button { min-width:0; min-height:53px; font-size:clamp(11.5px,3.3vw,13px); }
-.nav .icon { font-size:20px; }
-
-
-/* v2.3.0 HF2 — Izin & Insiden: satu baris, prioritas visual jelas. */
-.request-entry-actions {
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:9px;
-  align-items:stretch;
-}
-.request-entry-actions .request-entry-button {
-  display:inline-flex;
-  flex-wrap:nowrap;
-  align-items:center;
-  justify-content:center;
-  min-width:0;
-  min-height:58px;
-  width:100%;
-  margin:0;
-  padding:11px clamp(4px,1.8vw,10px);
-  gap:clamp(3px,1vw,7px);
-  font-size:clamp(11.5px,3.18vw,14px);
-  font-weight:750;
-  letter-spacing:-.2px;
-  line-height:1.15;
-  white-space:nowrap;
-  text-align:center;
-}
-.request-entry-actions .request-entry-button .icon {
-  width:1.1em;
-  height:1.1em;
-  flex:0 0 auto;
-}
-/* Uses the same danger palette as Log Out; red frame for a serious incident. */
-.request-entry-actions .request-incident-button {
-  background:linear-gradient(135deg,#fff4f4,#ffe5e7);
-  color:#a62636;
-  border:1.5px solid #d97e8b;
-  box-shadow:0 2px 7px #b43b4220;
-}
-.request-entry-actions .request-incident-button:hover {
-  background:linear-gradient(135deg,#fff0f0,#ffdbdf);
-}
-/* Preserve request form handlers; make the primary action unmistakable. */
-@media(max-width:350px) {
-  .request-entry-actions { grid-template-columns:minmax(0,1fr); }
-  .request-entry-actions .request-entry-button { font-size:15px; }
-}
-#request-form .request-form-actions {
-  display:grid;
-  grid-template-columns:minmax(0,1fr);
-  gap:9px;
-  margin:17px 0 4px;
-}
-#request-form .request-form-actions button {
-  min-width:0;
-  min-height:48px;
-  width:100%;
-  padding:11px 13px;
-  line-height:1.2;
-  white-space:nowrap;
-  font-size:clamp(14px,3.8vw,16px);
-}
-#request-form .request-form-actions .secondary {
-  background:#e7f2fd;
-  color:#0759a5;
-  margin:0;
-}
-#dialog:has(#request-form) #close {
-  min-height:42px;
-  padding:9px 15px;
-  margin-top:11px;
-}
-
-/* v2.3.0 HF3 — larger, legible two-choice Izin / Insiden entry. */
-.shell h1.request-page-heading {
-  display:flex;
-  align-items:center;
-  gap:9px;
-  font-size:clamp(19px,5.5vw,24px);
-  letter-spacing:-.55px;
-  line-height:1.25;
-  margin-bottom:15px;
-}
-.request-page-heading .icon { flex:0 0 auto; }
-.request-page-heading span { min-width:0; }
-.request-entry-actions { gap:10px; }
-.request-entry-actions .request-entry-button {
-  min-height:66px;
-  padding:12px 10px;
-  gap:9px;
-  font-size:clamp(19px,5.4vw,23px);
-  font-weight:850;
-  line-height:1.1;
-  letter-spacing:.15px;
-  white-space:nowrap;
-}
-.request-entry-actions .request-entry-button .icon {
-  width:1.12em;
-  height:1.12em;
-}
-@media(max-width:350px){
-  /* Short labels fit at 320px too; no need to stack the two actions. */
-  .request-entry-actions { grid-template-columns:repeat(2,minmax(0,1fr));gap:7px; }
-  .request-entry-actions .request-entry-button { padding-inline:5px;gap:5px;font-size:19px; }
-  .shell h1.request-page-heading { font-size:19px; }
-}

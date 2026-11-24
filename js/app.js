@@ -202,7 +202,14 @@ function passwordForm(reset=false) {
 function periodButton(){return btn('period',icon('calendar')+' '+esc(fmtDay(period+'-01',{month:'short',year:'numeric'}))+' ⌄','period')}
 // Rekap harian hanya dihitung dari MY_DAILY, bukan dari transaksi yang diverifikasi satu per satu.
 function summary(){return summarizeDaily(dailyMonth===period?dailyRows:[])}
-const colours=['HIJAU','KUNING','MERAH','BIRU','COKELAT'],colourText=['Hadir lengkap','Hadir sebagian','Tidak hadir/gagal','Izin resmi','Insiden'];
+// Backend retains MERAH for legacy Daily_Attendance and verifier contracts.
+// Calendar/dashboard use the six-color UI palette; do not reuse Late Count colors.
+const colours=['HIJAU','KUNING','MERAH','BIRU','COKELAT'],colourText=['Hadir lengkap','Hadir sebagian','Tidak hadir','Izin resmi','Insiden'];
+const calendarVisualState=state=>state==='MERAH'?'GRAY':state;
+const calendarPalette=[
+ ['HIJAU','Hadir lengkap'],['KUNING','Parsial A/B'],['GRAY','Tidak hadir A/B'],
+ ['BIRU','Izin'],['COKELAT','Insiden'],['HOLIDAY','Libur / cuti bersama']
+];
 const stat=(name,num,color,mark)=>'<div class="stat"><i style="--c:'+color+'">'+mark+'</i><b>'+num+'</b>'+name+'</div>';
 const byPeriod=()=>rows.filter(r=>dateISO(r.shiftDate||r.localDate).startsWith(period));
 const localTime=t=>wib(t,{hour:'2-digit',minute:'2-digit'}).replace('.',':');
@@ -221,7 +228,7 @@ function backlog(){
  return card(icon('refresh')+' Status pengiriman',queue.map(q=>'<div class="line"><span><b>'+esc(label(q.action))+
    '</b><br><small>'+esc(queueText(q))+'</small></span>'+btn('detail:'+q.id,'Detail','link')+'</div>').join(''));
 }
-const statusColours=['#12ac75','#ffb923','#f25162','#2489e0','#b5693c'];
+const statusColours=['#12ac75','#ffb923','#414b56','#2489e0','#b5693c'];
 const marks=['✓','◷','×','i','!'];
 function dashboard(){
  const hr=Number(wib(now(),{hour:'2-digit',hourCycle:'h23'})),today=dateKey(now()),totals=summary();
@@ -259,7 +266,7 @@ function history(){
    (category?'':backlog()+expiredRows.map(q=>msg(label(q.action)+' · '+q.issue)).join(''))+card('Rekap Kehadiran Harian',days.length?days.slice().reverse().map(d=>line(btn('day:'+d.workDate,esc(fmtDay(d.workDate)),'link'),esc(dayExplanation(d)))).join(''):empty(dailyLoaded?'Belum ada hari dalam kategori ini.':'Rekap belum dimuat.'))+
    (category?'':previewCard(mobilePreview()))+(entries(list)||card('Transaksi',empty('Belum ada transaksi yang cocok.')))+btn('home','Kembali ke Beranda','secondary full back-home','home');
 }
-const states={HOLIDAY:'Libur',UNSCHEDULED:'Belum terjadwal',UPCOMING:'Terjadwal',UNFINALIZED:'Belum final',IN_PROGRESS:'Shift berjalan',PENDING:'Menunggu verifikasi',REVIEW:'Perlu ditinjau'};
+const states={HOLIDAY:'Libur / cuti bersama',GRAY:'Tidak hadir',UNSCHEDULED:'Belum terjadwal',UPCOMING:'Terjadwal',UNFINALIZED:'Belum final',IN_PROGRESS:'Shift berjalan',PENDING:'Menunggu verifikasi',REVIEW:'Perlu ditinjau'};
 const stateName=state=>states[state]||colourText[colours.indexOf(state)]||'Belum dimuat';
 function calendar(){
  const first=new Date(period+'-01T12:00:00Z'),indent=(first.getUTCDay()+6)%7,today=dateKey(now());
@@ -278,14 +285,19 @@ function calendar(){
    const times=[d.checkInTime??legacyTime(day?.checkInRecordId,'CHECK_IN'),
      d.checkOutTime??legacyTime(day?.checkOutRecordId,'CHECK_OUT')];
    const shift=({NORMAL:'P',PAGI:'P',SORE:'S',MALAM:'M',LIBUR:'L'})[d.shift]||String(d.shift||'').slice(0,3);
-   const description=[fmtDay(d.workDate),d.shift,stateName(d.state),'Check-in '+(times[0]||'—'),'Check-out '+(times[1]||'—')].filter(Boolean).join(' · ');
-   return '<button class="cal-day" data-state="'+esc(d.state)+'" data-act="day:'+esc(d.workDate)+'" title="'+esc(description)+'" aria-label="'+
+   const visualState=calendarVisualState(d.state);
+   const description=[fmtDay(d.workDate),d.shift,stateName(visualState),'Check-in '+(times[0]||'—'),'Check-out '+(times[1]||'—')].filter(Boolean).join(' · ');
+   return '<button class="cal-day" data-state="'+esc(visualState)+'" data-act="day:'+esc(d.workDate)+'" title="'+esc(description)+'" aria-label="'+
      esc(description)+'" '+(d.workDate===today?'aria-current="date"':'')+'><b>'+Number(d.workDate.slice(-2))+'</b>'+
      times.map(t=>'<small>'+esc(t||'—')+'</small>').join('')+'<em>'+esc(shift||'·')+'</em></button>';
  }).join('');
  return '<h1>'+icon('calendar')+' Shift</h1><section class="card calendar-card">'+heading+
    (cells?'<div class="month-grid">'+['Sen','Sel','Rab','Kam','Jum','Sab','Min'].map(d=>'<span>'+d+'</span>').join('')+
-     '<i></i>'.repeat(indent)+cells+'</div>':empty('Kalender bulan ini belum dimuat.'))+'</section>'+previewCard(mobilePreview());
+     '<i></i>'.repeat(indent)+cells+'</div>':empty('Kalender bulan ini belum dimuat.'))+
+   '<div class="cal-palette" role="list" aria-label="Legenda warna Kalender Shift">'+
+     calendarPalette.map(([state,description])=>'<span class="cal-palette-item" role="listitem">'+
+       '<i class="cal-palette-swatch" data-state="'+state+'" aria-hidden="true"></i>'+description+'</span>').join('')+
+   '</div></section>'+previewCard(mobilePreview());
 }
 function showDay(date){
  const d=calendarDays.find(x=>x.workDate===date);
