@@ -1,5 +1,5 @@
 import {esc,btn,chip,msg,card,line,empty} from './ui.js';
-import {requestNames,normalizeDraft,requestList,leavePage,requestForm,requestDetail,lateCard,previewCard} from './views200.js';
+import {requestNames,normalizeDraft,requestList,leavePage,requestForm,requestDetail,lateCard,lateDayDetail,previewCard} from './views200.js';
 import {recordAttendance} from './capture.js';
 import {post,probe,getTimings} from './api.js';
 import {put,get,remove,owned} from './store.js';
@@ -17,6 +17,7 @@ let profilePhoto = '', photoGeneration = 0, refreshError = '', refreshDeferred =
 let expiredRows=[],todayRows=[],calendarDays=[], category='', dayReturn='';
 let audit=null, auditEmployee='', reviewOpen=false, deciding=false;
 let requestData=null, lateness=null, preview=[], previewMonth='';
+let latePersonalMode='harian',lateVerifierMode='pegawai',lateDetailMode='harian',lateSelected='',lateFilter='SEMUA';
 const mobilePreview=()=>navigator.onLine&&previewMonth===period?preview:[];
 function clearPreview(){preview=[];previewMonth='';document.querySelectorAll('[data-test-preview]').forEach(el=>el.remove());}
 const requestItems=()=>{
@@ -63,7 +64,7 @@ function toast(t){$('#notice').textContent=t;clearTimeout(toastTimer);toastTimer
 function modal(title,body){delete $('#panel').dataset.privateRecovery;$('#panel').innerHTML='<h2>'+esc(title)+'</h2>'+body+'<div id="feedback" role="status"></div>';if(!dialog.open)dialog.showModal()}
 function report(e){const t=describe(e)+(e.code&&!['CONFIG','TRANSPORT'].includes(e.code)?' ('+e.code+')':'');if(dialog.open&&$('#feedback'))$('#feedback').innerHTML=msg(t);else if($('#form-error'))$('#form-error').innerHTML=msg(t);else toast(t)}
 function saveSession(){temporary.setItem(ns+'session',JSON.stringify(session))}
-function clearSession(){recoverySession=null;recoveryAlerts=null;requestData=null;lateness=null;clearPreview();audit=null;auditEmployee='';reviewOpen=false;deciding=false;category='';dayReturn='';calendarDays=[];todayRows=[];expiredRows=[];epoch++;refreshScheduler.reset();photoGeneration++;setPhotoURL('');refreshError='';refreshDeferred=false;session=null;temporary.removeItem(ns+'session');rows=[];dailyRows=[];dailyMonth='';dailyLoaded=false;queue=[];drafts=[];verifier=[];loaded=false;lastSync=0;gpsAt=0;period='';filter='Semua';tab='home';if(dialog.open)dialog.close();render()}
+function clearSession(){recoverySession=null;recoveryAlerts=null;requestData=null;lateness=null;latePersonalMode='harian';lateVerifierMode='pegawai';lateDetailMode='harian';lateSelected='';lateFilter='SEMUA';clearPreview();audit=null;auditEmployee='';reviewOpen=false;deciding=false;category='';dayReturn='';calendarDays=[];todayRows=[];expiredRows=[];epoch++;refreshScheduler.reset();photoGeneration++;setPhotoURL('');refreshError='';refreshDeferred=false;session=null;temporary.removeItem(ns+'session');rows=[];dailyRows=[];dailyMonth='';dailyLoaded=false;queue=[];drafts=[];verifier=[];loaded=false;lastSync=0;gpsAt=0;period='';filter='Semua';tab='home';if(dialog.open)dialog.close();render()}
 function valid(){return session&&Date.now()<session.expires}
 async function api(action,body={}){
   const current=session;
@@ -252,7 +253,7 @@ function dashboard(){
    card(icon('calendar')+' Status Absensi Hari Ini',todayLines)+backlog()+
    card(icon('bars')+' Ringkasan Status','<div class="five">'+counts+'</div>')+
    '<div class="three">'+btn('history','Riwayat<br>Absensi','tile','history')+btn('newdraft','Pengajuan<br>Izin','tile','doc')+btn('incident','Laporan<br>Insiden','tile','shield')+'</div>'+
-   lateCard(lateness,period,false,periodButton)+card(icon('history')+' Riwayat Terakhir',byPeriod().slice(0,2).map(r=>line(esc(fmtDay(r.localDate))+' · '+esc(label(r.type)),esc(label(r.verificationStatus)))).join('')||empty('Belum ada transaksi pada periode ini.'));
+   lateCard(lateness,period,false,periodButton,{mode:latePersonalMode})+card(icon('history')+' Riwayat Terakhir',byPeriod().slice(0,2).map(r=>line(esc(fmtDay(r.localDate))+' · '+esc(label(r.type)),esc(label(r.verificationStatus)))).join('')||empty('Belum ada transaksi pada periode ini.'));
 }
 function history(){
  const days=category?dailyRows.filter(d=>d.finalStatus===category):dailyRows;
@@ -341,7 +342,7 @@ function recoveryQueueCard(){
 }
 function verification(){return '<h1>'+icon('shield')+' Verifikasi Absensi</h1><p class="subhead">Tinjau transaksi pilot yang menunggu keputusan.</p><div class="card wave between"><b>'+verifier.length+' transaksi dalam antrean</b><button data-act="sync" class="clock-refresh" aria-label="Perbarui antrean" title="Perbarui antrean">'+icon('refresh')+'</button></div>'+(!navigator.onLine?msg('Koneksi diperlukan untuk memuat dan memutuskan transaksi.'):'')+(verifier.map(r=>'<button class="card entry" data-review="'+esc(r.recordId)+'">'+icon('calendar')+'<span><b>'+esc(r.employeeName||'Nama pegawai belum tersedia')+' · '+esc(label(r.type))+'</b><small>'+esc(fmtDay(r.localDate))+(r.mobileTest?' · MODE UJI'+(r.testRunId?' · Sesi '+esc(r.testRunId.slice(0,8)):'')+' · GPS simulasi':'')+'</small></span>'+chip('Tinjau','yellow')+'</button>').join('')||card('Antrean verifikator',empty(loaded?'Tidak ada transaksi yang menunggu keputusan.':'Antrean pusat belum dimuat.')))+
    recoveryQueueCard()+(requestData?.reviewer?card('Permohonan pegawai',requestList(requestData.items,true)):'')}
-function statisticsPage(){return '<h1>'+icon('bars')+' Statistik</h1>'+lateCard(lateness,period,true,periodButton)}
+function statisticsPage(){return '<h1>'+icon('bars')+' Statistik</h1>'+lateCard(lateness,period,true,periodButton,{mode:lateSelected?lateDetailMode:lateVerifierMode,selected:lateSelected,filter:lateFilter})}
 function render(){
  if(recoverySession){
    app.className='login';
@@ -674,6 +675,45 @@ async function act(a){
  }
  case 'sync':await refreshScheduler.refresh(true);break;
  case 'category':category=arg;tab='history';dayReturn='';filter='Semua';render();window.scrollTo(0,0);scheduleSync(true);break;
+ case 'lateMode':{
+   if(!['harian','bulanan','pegawai','tren'].includes(arg))break;
+   if(session.role==='VERIFIER'){
+     if(lateSelected){if(['harian','bulanan'].includes(arg))lateDetailMode=arg;}
+     else if(['pegawai','tren'].includes(arg))lateVerifierMode=arg;
+   }else if(['harian','bulanan'].includes(arg))latePersonalMode=arg;
+   render();break;
+ }
+ case 'latePick':{
+   if(session.role!=='VERIFIER')break;
+   const id=decodeURIComponent(arg);
+   if(!lateness?.items?.some(r=>r.employeeId===id))break;
+   lateSelected=id;lateDetailMode='harian';render();break;
+ }
+ case 'lateBack':if(session.role==='VERIFIER'){lateSelected='';render();}break;
+ case 'lateFilter':{
+   if(session.role!=='VERIFIER')break;
+   const value=decodeURIComponent(arg);
+   if(value!=='SEMUA'&&!lateness?.items?.some(r=>r.profession===value))break;
+   lateFilter=value;render();break;
+ }
+ case 'lateDay':{
+   const id=session.role==='VERIFIER'?lateSelected:session.employeeId;
+   if(!id||!/^\d{4}-\d{2}-\d{2}$/.test(arg)||arg.slice(0,7)!==period)break;
+   modal('Rincian Kedisiplinan',lateDayDetail(lateness,id,arg));break;
+ }
+ case 'lateYearMove':{
+   const year=Number(period.slice(0,4))+Number(arg);
+   if(!Number.isInteger(year)||year<2020||year>2100)break;
+   period=String(year)+period.slice(4);clearPreview();await local();render();scheduleSync(true);break;
+ }
+ case 'lateMonth':{
+   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(arg))break;
+   period=arg;clearPreview();
+   if(session.role==='VERIFIER'){
+     if(lateSelected)lateDetailMode='harian';else lateVerifierMode='pegawai';
+   }else latePersonalMode='harian';
+   await local();render();scheduleSync(true);break;
+ }
  case 'monthMove':{
    const d=new Date(period+'-15T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+Number(arg));
    clearPreview();period=d.toISOString().slice(0,7);await local();render();scheduleSync(true);break;
@@ -763,7 +803,7 @@ async function act(a){
  case 'probe':await probe();modal('Uji koneksi API','<p>✓ GET health terbaca.</p><p>✓ POST tanpa token menghasilkan SESSION_REQUIRED.</p><p>Transport siap diuji dengan akun pilot.</p>');break;
  case 'install':if(installEvent){await installEvent.prompt();installEvent=null}else toast('Buka menu browser → Instal aplikasi / Tambahkan ke layar utama.');break;
  case 'password':modal('Ubah Password',passwordForm()+btn('security','Kembali ke Keamanan Akun','secondary'));break;
- case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.5.1</p>');break;
+ case 'about':modal('Tentang aplikasi','<p>Absensi Kehadiran Outsourcing<br>Kabupaten Kotawaringin Timur</p><p>Pilot PWA 2.5.6 · HF6</p>');break;
  case 'help':modal('Bantuan & panduan','<p>Masuk saat online untuk memuat jadwal. Izinkan kamera dan GPS, kunci lokasi, lalu selesaikan tiga tantangan. Tinjau foto dan kirim dalam lima menit.</p><p>Buka tab Shift untuk detail harian atau tekan warna di Ringkasan Status untuk melihat riwayat.</p>');break;
  case 'logout':modal('Log Out dari aplikasi?','<p>Foto presensi yang belum dikirim akan dihapus saat perekaman ditutup.</p>'+btn('confirmLogout','Log Out','danger'));break;
  case 'confirmLogout':{let revoked=false;try{if(navigator.onLine){await api('LOGOUT');revoked=true}}finally{clearSession();toast(revoked?'Anda berhasil Log Out.':'Sesi lokal ditutup. Sesi server berakhir sesuai masa berlakunya.')}break}
