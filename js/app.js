@@ -63,6 +63,8 @@ Object.assign(errors,{
  CONFIG:'Layanan presensi belum tersedia. Hubungi pengelola.',
  SERVICE_ERROR:'Layanan sedang mengalami kendala. Coba beberapa saat lagi.',
  SERVICE_INVALID_RESPONSE:'Data dari layanan belum lengkap. Perbarui halaman lalu coba lagi.',
+ GPS_MODE_CHANGED:'Pengaturan lokasi baru diperbarui. Silakan buka kembali perekaman untuk melanjutkan.',
+ GPS_MODE_SOURCE_UNAVAILABLE:'Layanan lokasi belum siap. Hubungi pengelola.',
  GPS_VARIATION_INSUFFICIENT:'Proses Memuat Lokasi Gagal. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Silakan ulangi proses absensi.',
  GPS_PRECHECK_INCOMPLETE:'Proses Memuat Lokasi Gagal. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Silakan ulangi proses absensi.',
  GPS_PATTERN_RETRY:'Lokasi belum dapat dipastikan. Silakan ulangi presensi dari awal.',

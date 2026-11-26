@@ -64,7 +64,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     return unique.length;
   }
   function samplesReady(){
-    if(info?.mobileTest)return true;
+    if(info?.mobileTest||info?.gpsProtectionMode==='INACTIVE')return true;
     const cfg=gpsSettings();
     return gpsSamples.length>=cfg.minSamples&&distinctInside()>=cfg.minDistinct&&
       gpsSamples.at(-1).at-gpsSamples[0].at>=cfg.minSpanMs&&
@@ -127,7 +127,8 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     if(info?.mobileTest && fix)fix.at=Date.now(); // Synthetic GPS never ages while the test screen is open.
     const good=fix&&Date.now()-fix.at<=15000&&Date.now()>=fix.at-1000;
     const ready=samplesReady(),elapsed=gpsStartedAt?Date.now()-gpsStartedAt:0;
-    if(!info.mobileTest&&gpsStartedAt&&elapsed>=gpsSettings().maxWaitMs&&!ready){
+    if(!info.mobileTest&&gpsStartedAt&&elapsed>=gpsSettings().maxWaitMs&&
+       (info.gpsProtectionMode==='INACTIVE'?!good:!ready)){
       fail(locationFailure);return;
     }
     const inside=good&&gpsInside(fix);
@@ -144,7 +145,8 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   // Some browsers emit watchPosition only when movement is detected. Request
   // additional fresh fixes without inventing motion or reusing timestamps.
   function requestExtraPosition(){
-    if(!gpsStartedAt||!navigator.geolocation||info?.mobileTest||(samplesReady()&&gpsInside(fix))||gpsPolling||
+    if(!gpsStartedAt||!navigator.geolocation||info?.mobileTest||info?.gpsProtectionMode==='INACTIVE'||
+       (samplesReady()&&gpsInside(fix))||gpsPolling||
        !['setup','location'].includes(phase)||Date.now()-gpsPollAt<4500)return;
     gpsPolling=true;gpsPollAt=Date.now();
     navigator.geolocation.getCurrentPosition(p=>{gpsPolling=false;collectPosition(p);},()=>{gpsPolling=false;},
@@ -205,7 +207,8 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     const alignedSamples=info.mobileTest?[]:gpsSamples.map(s=>({latitude:s.latitude,longitude:s.longitude,
       gpsAccuracy:s.gpsAccuracy,measuredAt:measuredAt-(fix.at-s.at)}));
     const reply=await timedCall('CAPTURE_LOCK',{type,testRunId:info.testRunId,scheduleId:info.scheduleId,shiftDate:info.shiftDate,
-      officeId:office.id,fix:{...fix,measuredAt},samples:alignedSamples});
+      officeId:office.id,gpsProtectionMode:info.gpsProtectionMode||'ACTIVE',fix:{...fix,measuredAt},
+      samples:info.gpsProtectionMode==='INACTIVE'?[]:alignedSamples});
     if(!current()||phase!=='locking')return;
     lockState=reply;challengeEnd=performance.now()+reply.challengeEnds-reply.serverNow;
     if(watch!==null){navigator.geolocation.clearWatch(watch);watch=null;}
