@@ -37,7 +37,9 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   const $=s=>panel.querySelector(s),video=$('video'),photo=$('.proof-preview'),status=$('.capture-status'),geo=$('.capture-geo'),
     clock=$('.countdown'),fixText=$('.fix'),gpsLoader=$('.capture-location-loading'),map=$('.office-map'),banner=$('.mobile-test-banner'),lock=$('[data-c=lock]'),submit=$('[data-c=send]'),retake=$('[data-c=retake]');
   const capture=$('.capture'),list=$('.challenge-list');
-  const locationFailure='Proses Memuat Lokasi Gagal. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Silakan ulangi proses absensi.';
+  const locationFailure='Proses Memuat Lokasi Gagal. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Jika memungkinkan, coba di area yang lebih terbuka, lalu ulangi proses absensi.';
+  const locationLoading='Memuat lokasi saat ini... Pastikan GPS aktif dan koneksi internet stabil. Mohon tunggu.';
+  const locationWaiting='Proses memuat lokasi masih berlangsung. Pastikan GPS perangkat aktif dan koneksi internet stabil. Sistem masih bekerja; tidak perlu menekan tombol berulang kali.';
   function highlight(index){
     Array.from(list.children).forEach((el,i)=>{
       el.dataset.step=i<index?'done':i===index?'current':'next';
@@ -127,18 +129,19 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     if(info?.mobileTest && fix)fix.at=Date.now(); // Synthetic GPS never ages while the test screen is open.
     const good=fix&&Date.now()-fix.at<=15000&&Date.now()>=fix.at-1000;
     const ready=samplesReady(),elapsed=gpsStartedAt?Date.now()-gpsStartedAt:0;
+    const inside=good&&gpsInside(fix);
+    // Timeout is about a usable location, not merely having enough GPS samples.
+    // In both modes, never leave the user waiting indefinitely outside the geofence.
     if(!info.mobileTest&&gpsStartedAt&&elapsed>=gpsSettings().maxWaitMs&&
-       (info.gpsProtectionMode==='INACTIVE'?!good:!ready)){
+       (!good||!inside||!ready)){
       fail(locationFailure);return;
     }
-    const inside=good&&gpsInside(fix);
     lock.disabled=!(phase==='location'&&inside&&ready&&model&&frontReady&&video.readyState>=2);
     gpsLoader.hidden=!!info.mobileTest||(inside&&ready);
     const gpsMessage=info.mobileTest?'MODE UJI · Lokasi simulasi':
       !good||!ready?(elapsed>=gpsSettings().initialWaitMs?
-        'Proses memuat lokasi masih berlangsung. Pastikan GPS aktif dan koneksi internet stabil. Tidak perlu menekan tombol berulang kali.':
-        'Memuat lokasi saat ini...'):
-      inside?'Lokasi siap. Silakan kunci lokasi.':'Lokasi belum sesuai area kerja. Coba berada lebih dekat ke kantor.';
+        locationWaiting:locationLoading):
+      inside?'Lokasi siap. Silakan kunci lokasi.':'Lokasi belum sesuai area kerja. Pastikan GPS aktif dan koneksi internet stabil, lalu coba berada lebih dekat ke kantor atau di area terbuka.';
     if(fixText.textContent!==gpsMessage)fixText.textContent=gpsMessage;
     drawOfficeMap(map,office,good?fix:null);
   }
@@ -168,11 +171,11 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     }
     updateFix();
     status.textContent='Menyiapkan kamera dan deteksi wajah…';
-    if(!info.mobileTest)fixText.textContent='Memuat lokasi saat ini...';
+    if(!info.mobileTest)fixText.textContent=locationLoading;
     if(!info.mobileTest){
       gpsStartedAt=Date.now();
       watch=navigator.geolocation.watchPosition(collectPosition,
-        e=>{if(e.code===1){fail(locationFailure);return;}fix=null;fixText.textContent='Memuat lokasi saat ini...';updateFix();},
+        e=>{if(e.code===1){fail(locationFailure);return;}fix=null;fixText.textContent=locationLoading;updateFix();},
     {enableHighAccuracy:true,maximumAge:0,timeout:15000});
     }
     const device=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'user'},width:{ideal:640},height:{ideal:640}},audio:false})
