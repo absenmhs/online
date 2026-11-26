@@ -6,7 +6,7 @@ export class ApiError extends Error {
 export function endpoint() {
   const s=window.MHS_CONFIG.apiUrl.trim();
   if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(s))
-    throw new ApiError('CONFIG','URL /exec belum diatur. Hubungi pengelola untuk mengisi js/config.js.');
+    throw new ApiError('CONFIG','Layanan presensi belum tersedia. Hubungi pengelola.');
   return s;
 }
 async function read(url,options){
@@ -17,7 +17,7 @@ async function read(url,options){
     const data=await res.json();
     if(typeof data.ok!=='boolean'||typeof data.code!=='string'||!data.apiVersion) throw Error();
     return data;
-  }catch{throw new ApiError('TRANSPORT','Respons JSON tidak terbaca. Periksa jaringan, akses deployment /exec dan izin lintas domain.')}
+  }catch{throw new ApiError('TRANSPORT','Koneksi ke layanan terputus. Periksa internet, lalu coba lagi.')}
   finally{clearTimeout(timer)}
 }
 export async function post(action,body={}) {

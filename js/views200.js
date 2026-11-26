@@ -2,6 +2,9 @@ import {icon} from './icons.js';
 import {esc,btn,chip,card,line,empty} from './ui.js';
 
 export const requestNames={LEAVE:'Pengajuan Izin',INCIDENT:'Pelaporan Insiden'};
+// Older offline drafts can carry raw transport/server errors; never expose them.
+const requestIssue=s=>/(json|\/exec|api|backend|script|exception|stack|trace|server error|status_view)/i.test(String(s||''))?
+  'Permintaan belum berhasil. Periksa koneksi lalu coba lagi.':String(s||'');
 const stages={DRAFT:'DRAF LOKAL',QUEUED:'MENUNGGU PENGIRIMAN',PENDING:'TERKIRIM · MENUNGGU PERSETUJUAN',
   APPROVED:'DISETUJUI',REJECTED:'DITOLAK',CANCELLED:'DIBATALKAN',REVIEWED:'SUDAH DITINJAU',CLOSED:'SELESAI',DENIED:'DITOLAK'};
 export function normalizeDraft(d){
@@ -52,7 +55,7 @@ export function requestDetail(r,review){
     '<p class="prose-request">'+esc(r.reason)+'</p>'+(incident?line('Jenis',esc(r.requestType||'Insiden')):'')+
     (r.at&&typeof r.at==='string'?line('Diajukan',esc(r.at)+' WIB'):'')+
     (decisions?line('Jumlah koreksi',(r.history||[]).filter(e=>e.prior!=='PENDING').length)+'<h3>Riwayat keputusan</h3><ol class="incident-history">'+decisions+'</ol>':'')+
-    (r.issue?'<p>'+esc(r.issue)+'</p>':'')+(r.reviewedBy?line('Keputusan',esc(r.reviewedBy+' · '+r.reviewedAt)):'')+
+    (r.issue?'<p>'+esc(requestIssue(r.issue))+'</p>':'')+(r.reviewedBy?line('Keputusan',esc(r.reviewedBy+' · '+r.reviewedAt)):'')+
     (r.notes?'<p class="prose-request">'+esc(r.notes)+'</p>':'')+
     (r.status==='DRAFT'?btn('editRequest:'+id,'Buka draf','primary')+' '+btn('deleteDraft:'+id,'Hapus draf','secondary'):'')+
     (r.status==='QUEUED'?btn('resendRequest','Periksa pengiriman','primary'):'')+

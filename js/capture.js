@@ -37,6 +37,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   const $=s=>panel.querySelector(s),video=$('video'),photo=$('.proof-preview'),status=$('.capture-status'),geo=$('.capture-geo'),
     clock=$('.countdown'),fixText=$('.fix'),map=$('.office-map'),banner=$('.mobile-test-banner'),lock=$('[data-c=lock]'),submit=$('[data-c=send]'),retake=$('[data-c=retake]');
   const capture=$('.capture'),list=$('.challenge-list');
+  const locationFailure='Proses Memuat Lokasi Gagal. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Silakan ulangi proses absensi.';
   function highlight(index){
     Array.from(list.children).forEach((el,i)=>{
       el.dataset.step=i<index?'done':i===index?'current':'next';
@@ -47,13 +48,35 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   const abort=new AbortController(),events={signal:abort.signal};
   let phase='setup',stream,model,watch=null,frame=0,pulse=null,office,info,fix,lockState,image='',steps=[],digest='',
     frontReady=false,infoAt=0,expiresPerf=0,expiresWall=0,disposed=false,challengeEnd=0;
+  let gpsSamples=[],gpsStartedAt=0,gpsPollAt=0,gpsPolling=false;
+  function gpsSettings(){return info?.gpsPrecheck||{minSamples:3,minSpanMs:3000,maxWaitMs:40000};}
+  function samplesReady(){
+    if(info?.mobileTest)return true;
+    const cfg=gpsSettings();
+    return gpsSamples.length>=cfg.minSamples && gpsSamples.at(-1).at-gpsSamples[0].at>=cfg.minSpanMs &&
+      Date.now()-gpsSamples.at(-1).at<=15000;
+  }
+  function collectPosition(position){
+    if(!current()||!['setup','location'].includes(phase))return;
+    const c=position.coords,at=position.timestamp;
+    if(!Number.isFinite(c.latitude)||!Number.isFinite(c.longitude)||!Number.isFinite(c.accuracy)||
+      Math.abs(c.latitude)>90||Math.abs(c.longitude)>180||c.accuracy<=0||
+      !Number.isFinite(at)||at>Date.now()+1000||Date.now()-at>15000)return;
+    if(gpsSamples.length&&at<=gpsSamples.at(-1).at)return; // repeated cached timestamp is not new data
+    const sample={latitude:c.latitude,longitude:c.longitude,gpsAccuracy:c.accuracy,at};
+    gpsSamples.push(sample);
+    const recent=at-45000;
+    gpsSamples=gpsSamples.filter(p=>p.at>=recent).slice(-12);
+    fix=sample;
+    updateFix();
+  }
   const closeButton=dialog.querySelector('#close');
   // A server timestamp is sampled after its request starts. Use the tightest
   // upper bound across the three replies so transit cannot extend the deadline.
   let serverOffsetUpper=Infinity;
   async function timedCall(route,payload){
     const start=performance.now(),reply=await api(route,payload);
-    if(!Number.isFinite(reply.serverNow))throw Error('Waktu server belum tersedia. Rekam ulang presensi.');
+    if(!Number.isFinite(reply.serverNow))throw Error('Sesi belum dapat dimulai. Silakan rekam ulang presensi.');
     serverOffsetUpper=Math.min(serverOffsetUpper,reply.serverNow-start);
     return reply;
   }
@@ -91,11 +114,23 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     const good=fix&&Date.now()-fix.at<=15000&&Date.now()>=fix.at-1000;
     const distance=fix?distanceTo(office,fix):0;
     const inside=good&&fix.gpsAccuracy>0&&fix.gpsAccuracy<=office.maxAccuracy&&distance+fix.gpsAccuracy<=office.radius;
-    lock.disabled=!(phase==='location'&&inside&&model&&frontReady&&video.readyState>=2);
-    if(fix)fixText.textContent=(good?'':'Sampel GPS kedaluwarsa · ')+
-      'Jarak '+Math.round(distance)+' m · Akurasi ±'+Math.ceil(fix.gpsAccuracy)+' m · Radius '+office.radius+' m'+
-      (inside?' · Dalam area':' · Tunggu posisi yang memenuhi batas');
+    if(!info.mobileTest&&gpsStartedAt&&Date.now()-gpsStartedAt>gpsSettings().maxWaitMs&&!samplesReady()){
+      fail(locationFailure);return;
+    }
+    lock.disabled=!(phase==='location'&&inside&&samplesReady()&&model&&frontReady&&video.readyState>=2);
+    fixText.textContent=info.mobileTest?'MODE UJI · Lokasi simulasi':
+      !good||!samplesReady()?'Memuat lokasi saat ini...':
+      inside?'Lokasi siap. Silakan kunci lokasi.':'Lokasi belum sesuai area kerja. Coba berada lebih dekat ke kantor.';
     drawOfficeMap(map,office,good?fix:null);
+  }
+  // Some browsers emit watchPosition only when movement is detected. Request
+  // additional fresh fixes without inventing motion or reusing timestamps.
+  function requestExtraPosition(){
+    if(!gpsStartedAt||!navigator.geolocation||info?.mobileTest||samplesReady()||gpsPolling||
+       !['setup','location'].includes(phase)||Date.now()-gpsPollAt<4500)return;
+    gpsPolling=true;gpsPollAt=Date.now();
+    navigator.geolocation.getCurrentPosition(p=>{gpsPolling=false;collectPosition(p);},()=>{gpsPolling=false;},
+      {enableHighAccuracy:true,maximumAge:0,timeout:12000});
   }
   async function setup(){
     if(!navigator.onLine)throw Error('Hubungkan internet untuk memulai sesi perekaman.');
@@ -113,18 +148,19 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     }
     updateFix();
     status.textContent='Menyiapkan kamera dan deteksi wajah…';
-    if(!info.mobileTest)fixText.textContent='Mencari posisi perangkat…';
-    if(!info.mobileTest)watch=navigator.geolocation.watchPosition(p=>{
-      fix={latitude:p.coords.latitude,longitude:p.coords.longitude,gpsAccuracy:p.coords.accuracy,at:p.timestamp};
-      updateFix();
-    },e=>{fix=null;fixText.textContent=e.code===1?'Izinkan lokasi untuk mengunci posisi.':'Posisi belum tersedia. Coba di area terbuka.';updateFix();},
+    if(!info.mobileTest)fixText.textContent='Memuat lokasi saat ini...';
+    if(!info.mobileTest){
+      gpsStartedAt=Date.now();
+      watch=navigator.geolocation.watchPosition(collectPosition,
+        e=>{if(e.code===1){fail(locationFailure);return;}fix=null;fixText.textContent='Memuat lokasi saat ini...';updateFix();},
     {enableHighAccuracy:true,maximumAge:0,timeout:15000});
+    }
     const device=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'user'},width:{ideal:640},height:{ideal:640}},audio:false})
       .catch(e=>{throw Error(cameraError(e));});
     if(!current()||phase!=='setup'){device.getTracks().forEach(t=>t.stop());return;}
     stream=device;video.srcObject=stream;await video.play();
     if(!current()||phase!=='setup')return;
-    const detector=await loadLandmarker().catch(()=>{throw Error('Model wajah belum dapat dimuat. Periksa internet dan dukungan WebAssembly browser, lalu rekam ulang.');});
+    const detector=await loadLandmarker().catch(()=>{throw Error('Pemeriksaan wajah belum siap. Periksa koneksi internet lalu rekam ulang.');});
     if(!current()||phase!=='setup'){detector.close();return;}
     model=detector;phase='location';status.textContent='Hadapkan wajah ke kamera, lalu kunci lokasi.';
     let stable=0,lastInference=-1000,lastTime=-1;
@@ -145,11 +181,13 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   }
   async function begin(){
     updateFix();if(lock.disabled||phase!=='location')return;
-    phase='locking';busyButton(lock,'Mengunci lokasi…',true);status.textContent='Memvalidasi posisi dengan server…';
+    phase='locking';busyButton(lock,'Mengunci lokasi…',true);status.textContent='Menyiapkan langkah berikutnya…';
     if(info.mobileTest)fix.at=Date.now();
     const measuredAt=Math.round(info.serverNow+(performance.now()-infoAt)-(Date.now()-fix.at));
+    const alignedSamples=info.mobileTest?[]:gpsSamples.map(s=>({latitude:s.latitude,longitude:s.longitude,
+      gpsAccuracy:s.gpsAccuracy,measuredAt:measuredAt-(fix.at-s.at)}));
     const reply=await timedCall('CAPTURE_LOCK',{type,testRunId:info.testRunId,scheduleId:info.scheduleId,shiftDate:info.shiftDate,
-      officeId:office.id,fix:{...fix,measuredAt}});
+      officeId:office.id,fix:{...fix,measuredAt},samples:alignedSamples});
     if(!current()||phase!=='locking')return;
     lockState=reply;challengeEnd=performance.now()+reply.challengeEnds-reply.serverNow;
     if(watch!==null){navigator.geolocation.clearWatch(watch);watch=null;}
@@ -178,7 +216,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
           }
         }
         frame=requestAnimationFrame(detect);
-      }catch(e){fail(e.message);}
+      }catch(e){fail(describe(e));}
     }
     frame=requestAnimationFrame(detect);
   }
@@ -266,6 +304,6 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     if(key==='retake'&&!retake.hidden&&!retake.disabled){again=true;dialog.close();}
   },events);
   let again=false;
-  pulse=setInterval(()=>{if(!alive()){dispose();return;}updateFix();updateClock();},500);
+  pulse=setInterval(()=>{if(!alive()){dispose();return;}requestExtraPosition();updateFix();updateClock();},500);
   setup().catch(handleError);await closed;return again;
 }

@@ -58,11 +58,34 @@ function dateISO(s){
   return m?m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'):'';
 }
 const fmtDay=(s,opts={day:'numeric',month:'short',year:'numeric'})=>dateISO(s)?wib(new Date(dateISO(s)+'T12:00:00+07:00'),opts):s;
-const describe=e=>errors[e.code]||e.message||'Permintaan gagal.';
+Object.assign(errors,{
+ TRANSPORT:'Koneksi ke layanan terputus. Periksa internet, lalu coba lagi.',
+ CONFIG:'Layanan presensi belum tersedia. Hubungi pengelola.',
+ SERVICE_ERROR:'Layanan sedang mengalami kendala. Coba beberapa saat lagi.',
+ SERVICE_INVALID_RESPONSE:'Data dari layanan belum lengkap. Perbarui halaman lalu coba lagi.',
+ GPS_PRECHECK_INCOMPLETE:'Proses Memuat Lokasi Gagal. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Silakan ulangi proses absensi.',
+ GPS_PATTERN_RETRY:'Lokasi belum dapat dipastikan. Silakan ulangi presensi dari awal.',
+ GPS_REVIEW_REQUIRED:'Koordinat lokasi ini dicurigai palsu atau hasil modifikasi, ulangi absensi dari awal.',
+ GPS_STALE:'Lokasi perlu dimuat ulang. Silakan ulangi presensi.',
+ GEOFENCE_REJECTED:'Lokasi belum berada dalam area kerja yang ditentukan. Coba lagi dari area kerja.',
+ LOCK_BUSY_RETRY:'Layanan sedang sibuk. Coba kembali.',
+ DEPENDENCY_UNAVAILABLE:'Layanan belum siap. Hubungi pengelola.',
+ GPS_AUDIT_SCHEMA_MISMATCH:'Layanan belum siap. Hubungi pengelola.'
+});
+// User-facing errors must not echo arbitrary API/runtime text, stack traces, or codes.
+// The developer retains diagnostics in browser tools and Apps Script logs.
+const describe=e=>{
+ if(e&&errors[e.code])return errors[e.code];
+ const message=typeof e?.message==='string'?e.message:'';
+ if(message.length>0&&message.length<190&&
+   /^(Periksa |Pastikan |Silakan |Izinkan |Tutup |Sambungkan |Hubungkan |Gunakan |Konfirmasi |Pilih |Masukkan |Sesi |Bukti |Waktu |Kamera |Lokasi |Foto |Rekam |Tanda terima |Presensi |Password |Data )/i.test(message)&&
+   !/(json|\/exec|api|script|backend|module|exception|syntax|stack|trace|webassembly|sheet|status_view|verification_log|script properties|server)/i.test(message))return message;
+ return 'Permintaan belum berhasil. Periksa koneksi lalu coba lagi.';
+};
 const actNames=['CHECKIN','CHECKOUT'];
 function toast(t){$('#notice').textContent=t;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#notice').textContent='',6500)}
 function modal(title,body){delete $('#panel').dataset.privateRecovery;$('#panel').innerHTML='<h2>'+esc(title)+'</h2>'+body+'<div id="feedback" role="status"></div>';if(!dialog.open)dialog.showModal()}
-function report(e){const t=describe(e)+(e.code&&!['CONFIG','TRANSPORT'].includes(e.code)?' ('+e.code+')':'');if(dialog.open&&$('#feedback'))$('#feedback').innerHTML=msg(t);else if($('#form-error'))$('#form-error').innerHTML=msg(t);else toast(t)}
+function report(e){const t=describe(e);if(dialog.open&&$('#feedback'))$('#feedback').innerHTML=msg(t);else if($('#form-error'))$('#form-error').innerHTML=msg(t);else toast(t)}
 function saveSession(){temporary.setItem(ns+'session',JSON.stringify(session))}
 function clearSession(){recoverySession=null;recoveryAlerts=null;requestData=null;lateness=null;latePersonalMode='harian';lateVerifierMode='pegawai';lateDetailMode='harian';lateSelected='';lateFilter='SEMUA';clearPreview();audit=null;auditEmployee='';reviewOpen=false;deciding=false;category='';dayReturn='';calendarDays=[];todayRows=[];expiredRows=[];epoch++;refreshScheduler.reset();photoGeneration++;setPhotoURL('');refreshError='';refreshDeferred=false;session=null;temporary.removeItem(ns+'session');rows=[];dailyRows=[];dailyMonth='';dailyLoaded=false;queue=[];drafts=[];verifier=[];loaded=false;lastSync=0;gpsAt=0;period='';filter='Semua';tab='home';if(dialog.open)dialog.close();render()}
 function valid(){return session&&Date.now()<session.expires}
@@ -125,7 +148,7 @@ function avatar() {
 }
 function refreshText() {
   if (!navigator.onLine) return 'Offline · data terakhir tetap tersedia';
-  if (refreshError) return 'Pembaruan tertunda · '+esc(refreshError);
+  if (refreshError) return esc(refreshError);
   return lastSync ? 'Terakhir '+esc(wib(lastSync,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))+' WIB' : 'Belum diperbarui';
 }
 function updateRefreshIndicator(manual = false) {
@@ -140,7 +163,7 @@ function updateRefreshIndicator(manual = false) {
   });
 }
 function refreshNotice(){
-  return refreshError?msg('Pembaruan tertunda · '+refreshError):'';
+  return refreshError?msg(refreshError):'';
 }
 function renderRefreshedData() {
   if (!session || session.mustChangePassword) return;
@@ -223,7 +246,7 @@ function queueText(q){
  if(q.receipt)return 'Diterima server · status belum lengkap';
  if(!q.v180)return 'Rekaman versi lama · memeriksa tanda terima';
  if(session.writeOpen===false)return 'Presensi sementara belum dibuka oleh pengelola. Tanda terima akan diperiksa.';
- return q.issue||'Penerimaan server belum terkonfirmasi';
+ return q.issue?describe({message:q.issue}):'Pengiriman belum dapat dipastikan. Periksa kembali status presensi.';
 }
 function backlog(){
  if(!queue.length)return '';
@@ -267,7 +290,7 @@ function history(){
    (category?'<div class="between">'+chip(colourText[colours.indexOf(category)])+btn('history','Semua kategori','link')+'</div>':'')+
    '<section class="card wave four">'+['Transaksi','Disetujui','Tertunda','Ditolak'].map((n,i)=>stat(n,i?all.filter(r=>r.verificationStatus===keys[i]).length:all.length,['#167be0','#18ac6b','#f7b116','#f0525a'][i],['▦','✓','◷','×'][i])).join('')+'</section>'+
    '<div class="filters">'+filters.map(v=>btn('filter:'+v,v,filter===v?'chosen':'')).join('')+'</div>'+
-   (category?'':backlog()+expiredRows.map(q=>msg(label(q.action)+' · '+q.issue)).join(''))+card('Rekap Kehadiran Harian',days.length?days.slice().reverse().map(d=>line(btn('day:'+d.workDate,esc(fmtDay(d.workDate)),'link'),esc(dayExplanation(d)))).join(''):empty(dailyLoaded?'Belum ada hari dalam kategori ini.':'Rekap belum dimuat.'))+
+   (category?'':backlog()+expiredRows.map(q=>msg(label(q.action)+' · '+describe({message:q.issue}))).join(''))+card('Rekap Kehadiran Harian',days.length?days.slice().reverse().map(d=>line(btn('day:'+d.workDate,esc(fmtDay(d.workDate)),'link'),esc(dayExplanation(d)))).join(''):empty(dailyLoaded?'Belum ada hari dalam kategori ini.':'Rekap belum dimuat.'))+
    (category?'':previewCard(mobilePreview()))+(entries(list)||card('Transaksi',empty('Belum ada transaksi yang cocok.')))+btn('home','Kembali ke Beranda','secondary full back-home','home');
 }
 const states={HOLIDAY:'Libur / cuti bersama',GRAY:'Tidak hadir',UNSCHEDULED:'Belum terjadwal',UPCOMING:'Terjadwal',UNFINALIZED:'Belum final',IN_PROGRESS:'Shift berjalan',PENDING:'Menunggu verifikasi',REVIEW:'Perlu ditinjau'};
@@ -419,12 +442,12 @@ async function synchronize(manual=false){
   refreshError = '';
   if(manual&&session===s)toast(s.role==='EMPLOYEE'&&queue.length?'Antrean belum tuntas. Buka detail untuk melihat alasannya.':'Data pusat diperbarui.');
  } catch(e) {
-   if (session === s){clearPreview();if(s.role==='VERIFIER'){recoveryAlerts=null;requestData=null;lateness=null;}refreshError = describe(e);}
+   if (session === s){clearPreview();if(s.role==='VERIFIER'){recoveryAlerts=null;requestData=null;lateness=null;}refreshError = 'Gagal memuat data terbaru. Periksa koneksi internet, lalu tekan Perbarui untuk mencoba lagi.';}
    if (manual) report(e);
  } finally {
    synchronizing = false;
    if (session === s) {
-     try { await local(); } catch(e) { refreshError = describe(e); }
+     try { await local(); } catch(e) { refreshError = 'Gagal memuat data terbaru. Periksa koneksi internet, lalu tekan Perbarui untuk mencoba lagi.'; }
      renderRefreshedData();
      updateRefreshIndicator();
    }
