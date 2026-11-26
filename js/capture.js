@@ -29,6 +29,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     '<div class="capture-dock"><div class="capture-geo"><h3 class="capture-geo-title">Memeriksa lokasi</h3><b class="office-name">Lokasi presensi</b>'+
     '<div class="office-map" aria-label="Peta kantor dan perangkat"></div><small class="map-key">● Kantor dan radius &nbsp; <b>● Perangkat</b></small><div class="capture-location-status"><div class="capture-location-loading" aria-hidden="true"><span class="capture-location-spinner"></span></div><p class="fix" role="status" aria-live="polite"></p></div></div>'+
     '<ol class="challenge-list" aria-label="Tiga tantangan wajah" hidden></ol><div class="capture-status" role="status"></div>'+
+    '<div class="capture-failure" role="alert" hidden><h3 class="capture-failure-heading"></h3><p class="capture-failure-detail"></p></div>'+
     '<p class="countdown" hidden></p><div class="capture-actions"><button class="primary" data-c="lock" disabled>Kunci Lokasi</button>'+
     '<button class="primary" data-c="send" hidden>Kirim Presensi</button><button class="secondary" data-c="retake" hidden>Ambil Ulang Foto</button></div></div></section>';
   panel.querySelector('h2').textContent=title;
@@ -36,10 +37,12 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   if(!dialog.open)dialog.showModal();
   const $=s=>panel.querySelector(s),video=$('video'),photo=$('.proof-preview'),status=$('.capture-status'),geo=$('.capture-geo'),
     clock=$('.countdown'),fixText=$('.fix'),gpsLoader=$('.capture-location-loading'),map=$('.office-map'),banner=$('.mobile-test-banner'),lock=$('[data-c=lock]'),submit=$('[data-c=send]'),retake=$('[data-c=retake]');
-  const capture=$('.capture'),list=$('.challenge-list');
+  const capture=$('.capture'),list=$('.challenge-list'),gpsFailure=$('.capture-failure'),gpsFailureTitle=$('.capture-failure-heading'),gpsFailureDetail=$('.capture-failure-detail');
   // Two beta classifications, never a diagnosis of installed applications.
-  const locationFailure='Proses Memuat Lokasi Gagal. Data lokasi belum dapat dipastikan atau memperlihatkan pola pembacaan yang tidak biasa. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Jika memungkinkan, coba di area yang lebih terbuka, lalu ulangi proses absensi.';
-  const locationHighRisk='Pemeriksaan Lokasi Tidak Berhasil. Terdeteksi pola lokasi yang sangat tidak wajar pada perangkat Anda. Aplikasi pengubah lokasi (fake GPS atau sejenisnya) dapat menyebabkan kondisi ini. Jika aplikasi tersebut terpasang, harap nonaktifkan atau hapus terlebih dahulu, lalu ulangi proses absensi.';
+  const locationFailure={classification:'A',title:'Proses Memuat Lokasi Gagal',
+    message:'Data lokasi belum dapat dipastikan atau memperlihatkan pola pembacaan yang tidak biasa. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Jika memungkinkan, coba di area yang lebih terbuka, lalu ulangi proses absensi.'};
+  const locationHighRisk={classification:'B',title:'Pemeriksaan Lokasi Tidak Berhasil',
+    message:'Terdeteksi pola lokasi yang sangat tidak wajar pada perangkat Anda. Aplikasi pengubah lokasi (fake GPS atau sejenisnya) dapat menyebabkan kondisi ini. Jika aplikasi tersebut terpasang, harap nonaktifkan atau hapus terlebih dahulu, lalu ulangi proses absensi.'};
   const locationLoading='Memuat lokasi saat ini... Pastikan GPS aktif dan koneksi internet stabil. Mohon tunggu.';
   const locationWaiting='Proses memuat lokasi masih berlangsung. Pastikan GPS perangkat aktif dan koneksi internet stabil. Sistem masih bekerja; tidak perlu menekan tombol berulang kali.';
   function highlight(index){
@@ -131,8 +134,8 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
       if(logged&&reply.classification==='B')classification='B';
     }catch(e){console.warn('GPS_PRECHECK_REPORT_UNAVAILABLE');}
     if(!current()||phase!=='reporting')return;
-    fail(classification==='B'?locationHighRisk+
-      (logged?' Hasil pemeriksaan telah dicatat untuk ditinjau Operator.':''):
+    fail(classification==='B'?{...locationHighRisk,
+      message:locationHighRisk.message+(logged?' Hasil pemeriksaan telah dicatat untuk ditinjau Operator.':'')}:
       locationFailure);
   }
   function samplesReady(){
@@ -191,7 +194,17 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   function fail(message){
     if(!current())return;
     phase='failed';capture.dataset.view='failed';list.hidden=true;gpsLoader.hidden=true;status.classList.remove('capture-working');halt();forget();video.hidden=true;geo.hidden=true;clock.hidden=true;
-    closeButton.disabled=retake.disabled=false;lock.hidden=submit.hidden=true;retake.hidden=false;retake.textContent='Rekam ulang';status.textContent=message;
+    closeButton.disabled=retake.disabled=false;lock.hidden=submit.hidden=true;retake.hidden=false;retake.textContent='Rekam ulang';
+    // HF12-R3: title and explanatory text occupy separate visual panels.
+    // A/B remain internal classifications, never labels shown to employees.
+    if(message&&typeof message==='object'&&['A','B'].includes(message.classification)&&
+       typeof message.title==='string'&&typeof message.message==='string'){
+      status.textContent='';status.hidden=true;gpsFailureTitle.textContent=message.title;
+      gpsFailureDetail.textContent=message.message;gpsFailure.dataset.classification=message.classification;
+      gpsFailure.hidden=false;
+    }else{
+      gpsFailure.hidden=true;status.hidden=false;status.textContent=String(message||'Perekaman belum berhasil. Silakan coba kembali.');
+    }
   }
   function handleError(e){
     if(e.code==='POC_WRITE_DISABLED'||e.code==='SIMULATION_PANEL_ONLY')onDisabled();
@@ -220,7 +233,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     const gpsMessage=info.mobileTest?'MODE UJI · Lokasi simulasi':
       !good||!ready?(elapsed>=gpsSettings().initialWaitMs?
         (gpsSamples.length>=gpsSettings().minSamples&&distinctInside()<=1?
-          'Lokasi belum menunjukkan perubahan yang cukup. Pastikan GPS aktif dan koneksi internet stabil. Sistem masih memeriksa, tidak perlu menekan tombol berulang kali.':locationWaiting):locationLoading):
+          'Sedang memuat pola lokasi. Pastikan GPS aktif dan koneksi internet stabil. Sistem masih memeriksa, tidak perlu menekan tombol berulang kali.':locationWaiting):locationLoading):
       inside?'Lokasi siap. Silakan kunci lokasi.':'Lokasi belum sesuai area kerja. Pastikan GPS aktif dan koneksi internet stabil, lalu coba berada lebih dekat ke kantor atau di area terbuka.';
     if(fixText.textContent!==gpsMessage)fixText.textContent=gpsMessage;
     drawOfficeMap(map,office,good?fix:null);

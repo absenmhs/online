@@ -1122,3 +1122,13 @@ dialog.recording{
 .recording .capture-dock .capture-status{font-size:clamp(.88rem,2.9vw,.98rem);line-height:1.4;font-weight:650}
 .recording .capture-dock{gap:10px;padding:clamp(12px,3vw,16px)}
 .recording .capture-actions button[disabled]{opacity:.65;cursor:not-allowed}
+
+
+/* HF12-R3: error classification stays internal; two distinct boxes improve
+   status/title versus advice readability on small mobile camera screens. */
+.recording .capture-failure{display:grid;gap:10px;min-width:0}
+.recording .capture-failure-heading,
+.recording .capture-failure-detail{margin:0;box-sizing:border-box;min-width:0;padding:12px 14px;border-radius:10px;overflow-wrap:anywhere}
+.recording .capture-failure-heading{font-size:clamp(1rem,3.55vw,1.15rem);font-weight:750;line-height:1.35;color:#fff;background:#314c5e;border:1px solid #89a8b9}
+.recording .capture-failure-detail{font-size:clamp(.88rem,3vw,.98rem);font-weight:450;line-height:1.52;color:#e9f1f5;background:#142634;border:1px solid #ffffff4d}
+.recording .capture-failure[data-classification="B"] .capture-failure-heading{background:#563933;border-color:#e4a999}
