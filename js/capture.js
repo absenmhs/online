@@ -38,11 +38,19 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   const $=s=>panel.querySelector(s),video=$('video'),photo=$('.proof-preview'),status=$('.capture-status'),geo=$('.capture-geo'),
     clock=$('.countdown'),fixText=$('.fix'),gpsLoader=$('.capture-location-loading'),map=$('.office-map'),banner=$('.mobile-test-banner'),lock=$('[data-c=lock]'),submit=$('[data-c=send]'),retake=$('[data-c=retake]');
   const capture=$('.capture'),list=$('.challenge-list'),gpsFailure=$('.capture-failure'),gpsFailureTitle=$('.capture-failure-heading'),gpsFailureDetail=$('.capture-failure-detail');
-  // Two beta classifications, never a diagnosis of installed applications.
-  const locationFailure={classification:'A',title:'Proses Memuat Lokasi Gagal',
-    message:'Data lokasi belum dapat dipastikan atau memperlihatkan pola pembacaan yang tidak biasa. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Jika memungkinkan, coba di area yang lebih terbuka, lalu ulangi proses absensi.'};
-  const locationHighRisk={classification:'B',title:'Pemeriksaan Lokasi Tidak Berhasil',
-    message:'Terdeteksi pola lokasi yang sangat tidak wajar pada perangkat Anda. Aplikasi pengubah lokasi (fake GPS atau sejenisnya) dapat menyebabkan kondisi ini. Jika aplikasi tersebut terpasang, harap nonaktifkan atau hapus terlebih dahulu, lalu ulangi proses absensi.'};
+  // HF12-R4: four user-facing outcomes, with internal codes never printed.
+  // Security thresholds, raw counts, and pattern flags stay in operator logs.
+  const gpsFailures={
+    A:{classification:'A',title:'Proses Memuat Lokasi Gagal',
+      message:'Sistem belum berhasil memperoleh informasi lokasi perangkat Anda. Pastikan GPS aktif, izin lokasi telah diberikan, dan koneksi internet stabil. Silakan ulangi proses absensi.'},
+    B:{classification:'B',title:'Pemeriksaan Lokasi Tidak Berhasil',
+      message:'Terdeteksi pola lokasi yang sangat tidak wajar pada perangkat Anda. Aplikasi pengubah lokasi (fake GPS atau sejenisnya) dapat menyebabkan kondisi ini. Jika aplikasi tersebut terpasang, harap nonaktifkan atau hapus terlebih dahulu, lalu ulangi proses absensi.'},
+    C:{classification:'C',title:'Lokasi Belum Dapat Dipastikan',
+      message:'Sistem telah menerima informasi lokasi, tetapi hasil pemeriksaan belum dapat dipastikan. Pastikan GPS aktif dan koneksi internet stabil, kemudian ulangi proses absensi. Anda tidak perlu berpindah tempat.'},
+    D:{classification:'D',title:'Lokasi Belum Memenuhi Persyaratan',
+      message:'Sistem belum dapat mengonfirmasi lokasi perangkat di area kerja yang ditentukan. Pastikan Anda berada di lokasi bertugas, lalu ulangi pemeriksaan. Jika sudah berada di kantor, hubungi petugas untuk mendapatkan bantuan.'}
+  };
+  const locationFailure=gpsFailures.A;
   const locationLoading='Memuat lokasi saat ini... Pastikan GPS aktif dan koneksi internet stabil. Mohon tunggu.';
   const locationWaiting='Proses memuat lokasi masih berlangsung. Pastikan GPS perangkat aktif dan koneksi internet stabil. Sistem masih bekerja; tidak perlu menekan tombol berulang kali.';
   function highlight(index){
@@ -56,6 +64,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   let phase='setup',stream,model,watch=null,frame=0,pulse=null,office,info,fix,lockState,image='',steps=[],digest='',
     frontReady=false,infoAt=0,expiresPerf=0,expiresWall=0,disposed=false,challengeEnd=0;
   let gpsSamples=[],gpsStartedAt=0,gpsPollAt=0,gpsPolling=false,gpsReportSent=false,gpsPatternAdvisory=false;
+  let gpsRawCount=0,gpsDuplicateTimestampCount=0,gpsInvalidCount=0;
   const gpsAttemptId=crypto.randomUUID?.()||'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const n=crypto.getRandomValues(new Uint8Array(1))[0]&15;return (c==='x'?n:((n&3)|8)).toString(16);});
   function gpsSettings(){return info?.gpsPrecheck||{minSamples:8,minDistinct:3,minSpanMs:3000,
     initialWaitMs:60000,maxWaitMs:120000,maxSamples:15};}
@@ -71,72 +80,71 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     }
     return unique.length;
   }
-  // HF12: pattern analysis starts with the first GPS samples. Report only
-  // persistent independent patterns. The decimal text supplied by Android is
-  // unavailable through Geolocation API: JS Numbers lose trailing zeros.
+  // Coordinate-pattern signal is updated on each accepted sample. It is
+  // advisory only, and never vetoes an otherwise healthy Dynamic GPS reading.
+  // JS numeric coordinates do not preserve trailing zeros from Android.
+  function gpsStrongNumericPattern(sample){
+    const digits=n=>(Math.abs(n)%1).toFixed(8).slice(2).replace(/0+$/,'');
+    const lat=digits(sample.latitude),lon=digits(sample.longitude);
+    const repeated=v=>/^(\d)\1{3,}$/.test(v);
+    return (lat.length<=3&&lon.length<=3)||(repeated(lat)&&repeated(lon));
+  }
   function gpsPatternConcern(){
     const unique=[];
     for(const s of gpsSamples){
       if(!gpsInside(s))continue;
       if(!unique.some(p=>distanceTo({lat:p.latitude,lon:p.longitude},s)<=0.01))unique.push(s);
     }
-    if(unique.length<3)return false;
-    const repeated=n=>{const t=(Math.abs(n)%1).toFixed(8).slice(2).replace(/0+$/,'');return /^(\d)\1{3,}$/.test(t);};
-    const coarse=n=>(Math.abs(n)%1).toFixed(8).slice(2).replace(/0+$/,'').length<=3;
-    const both=unique.filter(s=>repeated(s.latitude)&&repeated(s.longitude)).length;
-    const rounded=unique.filter(s=>coarse(s.latitude)&&coarse(s.longitude)).length;
-    return both/unique.length>=2/3||rounded/unique.length>=.85;
-  }
-  // Class A: location unverified / persistent low variation alone.
-  // Class B: persistent insufficient variation PLUS an independently visible
-  // numeric pattern on both axes of every eligible unique fix.
-  // Never label an installed app or use a single rounded fix as proof.
-  function gpsStrongNumericPattern(s){
-    const digits=n=>(Math.abs(n)%1).toFixed(8).slice(2).replace(/0+$/,'');
-    const lat=digits(s.latitude),lon=digits(s.longitude);
-    const repeated=v=>/^(\d)\1{3,}$/.test(v);
-    return (lat.length<=3&&lon.length<=3)||(repeated(lat)&&repeated(lon));
+    return unique.length>0&&unique.every(gpsStrongNumericPattern);
   }
   function gpsPrelockClassification(){
-    if(info?.mobileTest||info?.gpsProtectionMode==='INACTIVE')return '';
+    // A = missing/old data; D = latest fix out of geofence/accuracy;
+    // C = enough readings but too little variation; B = corroborated high risk.
+    // Only classify after the normal chance to collect fresh fixes has elapsed.
+    if(info?.mobileTest)return '';
     const cfg=gpsSettings(),last=gpsSamples.at(-1);
-    if(gpsSamples.length<cfg.minSamples||!last||!gpsInside(last)||
-       last.at-gpsSamples[0].at<45000||Date.now()-last.at>15000||
-       distinctInside()>=cfg.minDistinct)return '';
-    const unique=[];let allInside=true;
-    for(const s of gpsSamples){
-      if(!gpsInside(s)){allInside=false;continue;}
-      if(!unique.some(p=>distanceTo({lat:p.latitude,lon:p.longitude},s)<=0.01))unique.push(s);
-    }
-    return allInside&&unique.length>0&&unique.every(gpsStrongNumericPattern)?'B':'A';
+    if(info?.gpsProtectionMode==='INACTIVE')
+      return last&&Date.now()-last.at<=15000&&!gpsInside(last)?'D':'A';
+    if(gpsSamples.length<cfg.minSamples||!last||Date.now()-last.at>15000)return 'A';
+    if(!gpsInside(last))return 'D';
+    if(last.at-gpsSamples[0].at<cfg.minSpanMs)return 'A';
+    if(distinctInside()>=cfg.minDistinct)return '';
+    const allInside=gpsSamples.every(gpsInside);
+    return allInside&&last.at-gpsSamples[0].at>=45000&&gpsPatternAdvisory?'B':'C';
   }
   function serverAligned(){
-    const newest=gpsSamples.at(-1);if(!newest)return null;
+    const newest=gpsSamples.at(-1);
+    if(!newest)return {fix:null,samples:[]};
     const measuredAt=Math.round(info.serverNow+(performance.now()-infoAt)-(Date.now()-newest.at));
     const samples=gpsSamples.map(s=>({latitude:s.latitude,longitude:s.longitude,
       gpsAccuracy:s.gpsAccuracy,measuredAt:measuredAt-(newest.at-s.at)}));
-    return {fix:{...newest,measuredAt},samples};
+    return {fix:{latitude:newest.latitude,longitude:newest.longitude,gpsAccuracy:newest.gpsAccuracy,measuredAt},samples};
   }
   async function reportPrelock(){
-    if(gpsReportSent||!current()||phase!=='location'||info?.mobileTest||
-       info?.gpsProtectionMode==='INACTIVE')return;
-    const localClass=gpsPrelockClassification();
-    if(!localClass){fail(locationFailure);return;}
-    const aligned=serverAligned();if(!aligned){fail(locationFailure);return;}
+    if(gpsReportSent||!current()||phase!=='location'||info?.mobileTest)return;
+    const localClass=gpsPrelockClassification()||'A';
+    if(info?.gpsProtectionMode==='INACTIVE'){fail(gpsFailures[localClass]||locationFailure);return;}
     gpsReportSent=true;phase='reporting';lock.disabled=true;lock.textContent='Memeriksa lokasi…';
     status.textContent='';fixText.textContent='Pemeriksaan lokasi belum berhasil. Menyiapkan hasil pemeriksaan…';
-    let logged=false,classification='A';
+    let logged=false,classification=localClass;
     try{
       const reply=await api('CAPTURE_GPS_REPORT',{type,testRunId:info.testRunId,
         scheduleId:info.scheduleId,shiftDate:info.shiftDate,officeId:office.id,
-        gpsProtectionMode:info.gpsProtectionMode||'ACTIVE',attemptId:gpsAttemptId,...aligned});
+        gpsProtectionMode:info.gpsProtectionMode||'ACTIVE',attemptId:gpsAttemptId,
+        diagnostics:{received:gpsRawCount,duplicateTimestamp:gpsDuplicateTimestampCount,
+          invalid:gpsInvalidCount,elapsedMs:Math.max(0,Date.now()-gpsStartedAt)},
+        ...serverAligned()});
       logged=reply?.logged===true&&reply.code==='GPS_REPORT_RECORDED';
-      if(logged&&reply.classification==='B')classification='B';
-    }catch(e){console.warn('GPS_PRECHECK_REPORT_UNAVAILABLE');}
+      if(logged&&['A','B','C','D'].includes(reply.classification))classification=reply.classification;
+      else if(localClass==='B')classification='A'; // never accuse based on local-only pattern
+    }catch(e){
+      console.warn('GPS_PRECHECK_REPORT_UNAVAILABLE');
+      if(localClass==='B')classification='A';
+    }
     if(!current()||phase!=='reporting')return;
-    fail(classification==='B'?{...locationHighRisk,
-      message:locationHighRisk.message+(logged?' Hasil pemeriksaan telah dicatat untuk ditinjau Operator.':'')}:
-      locationFailure);
+    const base=gpsFailures[classification]||locationFailure;
+    fail(classification==='B'&&logged?{...base,
+      message:base.message+' Hasil pemeriksaan telah dicatat untuk ditinjau Operator.'}:base);
   }
   function samplesReady(){
     if(info?.mobileTest||info?.gpsProtectionMode==='INACTIVE')return true;
@@ -147,11 +155,12 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   }
   function collectPosition(position){
     if(!current()||!['setup','location'].includes(phase))return;
+    gpsRawCount++;
     const c=position.coords,at=position.timestamp;
     if(!Number.isFinite(c.latitude)||!Number.isFinite(c.longitude)||!Number.isFinite(c.accuracy)||
       Math.abs(c.latitude)>90||Math.abs(c.longitude)>180||c.accuracy<=0||
-      !Number.isFinite(at)||at>Date.now()+1000||Date.now()-at>15000)return;
-    if(gpsSamples.length&&at<=gpsSamples.at(-1).at)return; // repeated cached timestamp is not new data
+      !Number.isFinite(at)||at>Date.now()+1000||Date.now()-at>15000){gpsInvalidCount++;return;}
+    if(gpsSamples.length&&at<=gpsSamples.at(-1).at){gpsDuplicateTimestampCount++;return;} // cached timestamp is not new data
     const sample={latitude:c.latitude,longitude:c.longitude,gpsAccuracy:c.accuracy,at};
     gpsSamples.push(sample);
     const recent=at-(gpsSettings().maxWaitMs+10000);
@@ -196,8 +205,8 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     phase='failed';capture.dataset.view='failed';list.hidden=true;gpsLoader.hidden=true;status.classList.remove('capture-working');halt();forget();video.hidden=true;geo.hidden=true;clock.hidden=true;
     closeButton.disabled=retake.disabled=false;lock.hidden=submit.hidden=true;retake.hidden=false;retake.textContent='Rekam ulang';
     // HF12-R3: title and explanatory text occupy separate visual panels.
-    // A/B remain internal classifications, never labels shown to employees.
-    if(message&&typeof message==='object'&&['A','B'].includes(message.classification)&&
+    // A/B/C/D codes remain internal and never appear in employee-facing text.
+    if(message&&typeof message==='object'&&['A','B','C','D'].includes(message.classification)&&
        typeof message.title==='string'&&typeof message.message==='string'){
       status.textContent='';status.hidden=true;gpsFailureTitle.textContent=message.title;
       gpsFailureDetail.textContent=message.message;gpsFailure.dataset.classification=message.classification;
@@ -216,15 +225,15 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     const good=fix&&Date.now()-fix.at<=15000&&Date.now()>=fix.at-1000;
     const ready=samplesReady(),elapsed=gpsStartedAt?Date.now()-gpsStartedAt:0;
     const inside=good&&gpsInside(fix);
-    // A/B only when the prelock series has enough fresh measurements and
-    // independent time span. Pattern alone never prevents a healthy lock.
+    // Early stop only for a corroborated B (long, low-variation plus strong
+    // numeric pattern). Other failures retain the full 120-second window.
     if(!info.mobileTest&&info.gpsProtectionMode!=='INACTIVE'&&elapsed>=90000&&
-       gpsPrelockClassification()){
+       gpsPrelockClassification()==='B'){
       reportPrelock().catch(()=>fail(locationFailure));return;
     }
     if(!info.mobileTest&&gpsStartedAt&&elapsed>=gpsSettings().maxWaitMs&&
        (!good||!inside||!ready)){
-      fail(locationFailure);return;
+      reportPrelock().catch(()=>fail(locationFailure));return;
     }
     lock.disabled=!(phase==='location'&&inside&&ready&&model&&frontReady&&video.readyState>=2);
     lock.textContent=inside&&ready?'Kunci Lokasi':'Menunggu lokasi…';

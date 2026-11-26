@@ -1132,3 +1132,7 @@ dialog.recording{
 .recording .capture-failure-heading{font-size:clamp(1rem,3.55vw,1.15rem);font-weight:750;line-height:1.35;color:#fff;background:#314c5e;border:1px solid #89a8b9}
 .recording .capture-failure-detail{font-size:clamp(.88rem,3vw,.98rem);font-weight:450;line-height:1.52;color:#e9f1f5;background:#142634;border:1px solid #ffffff4d}
 .recording .capture-failure[data-classification="B"] .capture-failure-heading{background:#563933;border-color:#e4a999}
+
+/* HF12-R4: four public outcomes, still one consistent two-box hierarchy. */
+.recording .capture-failure[data-classification="C"] .capture-failure-heading{background:#29485d;border-color:#83b1c4}
+.recording .capture-failure[data-classification="D"] .capture-failure-heading{background:#55472f;border-color:#dbbc7e}
