@@ -37,7 +37,9 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   const $=s=>panel.querySelector(s),video=$('video'),photo=$('.proof-preview'),status=$('.capture-status'),geo=$('.capture-geo'),
     clock=$('.countdown'),fixText=$('.fix'),gpsLoader=$('.capture-location-loading'),map=$('.office-map'),banner=$('.mobile-test-banner'),lock=$('[data-c=lock]'),submit=$('[data-c=send]'),retake=$('[data-c=retake]');
   const capture=$('.capture'),list=$('.challenge-list');
-  const locationFailure='Proses Memuat Lokasi Gagal. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Jika memungkinkan, coba di area yang lebih terbuka, lalu ulangi proses absensi.';
+  // Two beta classifications, never a diagnosis of installed applications.
+  const locationFailure='Proses Memuat Lokasi Gagal. Data lokasi belum dapat dipastikan atau memperlihatkan pola pembacaan yang tidak biasa. Pastikan koneksi internet stabil, GPS perangkat aktif, dan izin akses lokasi telah diberikan. Jika memungkinkan, coba di area yang lebih terbuka, lalu ulangi proses absensi.';
+  const locationHighRisk='Pemeriksaan Lokasi Tidak Berhasil. Terdeteksi pola lokasi yang sangat tidak wajar pada perangkat Anda. Aplikasi pengubah lokasi (fake GPS atau sejenisnya) dapat menyebabkan kondisi ini. Jika aplikasi tersebut terpasang, harap nonaktifkan atau hapus terlebih dahulu, lalu ulangi proses absensi.';
   const locationLoading='Memuat lokasi saat ini... Pastikan GPS aktif dan koneksi internet stabil. Mohon tunggu.';
   const locationWaiting='Proses memuat lokasi masih berlangsung. Pastikan GPS perangkat aktif dan koneksi internet stabil. Sistem masih bekerja; tidak perlu menekan tombol berulang kali.';
   function highlight(index){
@@ -50,7 +52,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   const abort=new AbortController(),events={signal:abort.signal};
   let phase='setup',stream,model,watch=null,frame=0,pulse=null,office,info,fix,lockState,image='',steps=[],digest='',
     frontReady=false,infoAt=0,expiresPerf=0,expiresWall=0,disposed=false,challengeEnd=0;
-  let gpsSamples=[],gpsStartedAt=0,gpsPollAt=0,gpsPolling=false,gpsReportSent=false;
+  let gpsSamples=[],gpsStartedAt=0,gpsPollAt=0,gpsPolling=false,gpsReportSent=false,gpsPatternAdvisory=false;
   const gpsAttemptId=crypto.randomUUID?.()||'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const n=crypto.getRandomValues(new Uint8Array(1))[0]&15;return (c==='x'?n:((n&3)|8)).toString(16);});
   function gpsSettings(){return info?.gpsPrecheck||{minSamples:8,minDistinct:3,minSpanMs:3000,
     initialWaitMs:60000,maxWaitMs:120000,maxSamples:15};}
@@ -82,12 +84,28 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     const rounded=unique.filter(s=>coarse(s.latitude)&&coarse(s.longitude)).length;
     return both/unique.length>=2/3||rounded/unique.length>=.85;
   }
-  function gpsStaticLongEnough(){
-    return gpsSamples.length>=gpsSettings().minSamples&&
-      gpsSamples.at(-1).at-gpsSamples[0].at>=45000&&
-      Date.now()-gpsSamples.at(-1).at<=15000&&
-      gpsSamples.every(s=>s.latitude===gpsSamples[0].latitude&&s.longitude===gpsSamples[0].longitude)&&
-      gpsInside(gpsSamples.at(-1));
+  // Class A: location unverified / persistent low variation alone.
+  // Class B: persistent insufficient variation PLUS an independently visible
+  // numeric pattern on both axes of every eligible unique fix.
+  // Never label an installed app or use a single rounded fix as proof.
+  function gpsStrongNumericPattern(s){
+    const digits=n=>(Math.abs(n)%1).toFixed(8).slice(2).replace(/0+$/,'');
+    const lat=digits(s.latitude),lon=digits(s.longitude);
+    const repeated=v=>/^(\d)\1{3,}$/.test(v);
+    return (lat.length<=3&&lon.length<=3)||(repeated(lat)&&repeated(lon));
+  }
+  function gpsPrelockClassification(){
+    if(info?.mobileTest||info?.gpsProtectionMode==='INACTIVE')return '';
+    const cfg=gpsSettings(),last=gpsSamples.at(-1);
+    if(gpsSamples.length<cfg.minSamples||!last||!gpsInside(last)||
+       last.at-gpsSamples[0].at<45000||Date.now()-last.at>15000||
+       distinctInside()>=cfg.minDistinct)return '';
+    const unique=[];let allInside=true;
+    for(const s of gpsSamples){
+      if(!gpsInside(s)){allInside=false;continue;}
+      if(!unique.some(p=>distanceTo({lat:p.latitude,lon:p.longitude},s)<=0.01))unique.push(s);
+    }
+    return allInside&&unique.length>0&&unique.every(gpsStrongNumericPattern)?'B':'A';
   }
   function serverAligned(){
     const newest=gpsSamples.at(-1);if(!newest)return null;
@@ -99,25 +117,28 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   async function reportPrelock(){
     if(gpsReportSent||!current()||phase!=='location'||info?.mobileTest||
        info?.gpsProtectionMode==='INACTIVE')return;
-    const aligned=serverAligned();if(!aligned)return;
+    const localClass=gpsPrelockClassification();
+    if(!localClass){fail(locationFailure);return;}
+    const aligned=serverAligned();if(!aligned){fail(locationFailure);return;}
     gpsReportSent=true;phase='reporting';lock.disabled=true;lock.textContent='Memeriksa lokasi…';
     status.textContent='';fixText.textContent='Pemeriksaan lokasi belum berhasil. Menyiapkan hasil pemeriksaan…';
-    let logged=false;
+    let logged=false,classification='A';
     try{
       const reply=await api('CAPTURE_GPS_REPORT',{type,testRunId:info.testRunId,
         scheduleId:info.scheduleId,shiftDate:info.shiftDate,officeId:office.id,
         gpsProtectionMode:info.gpsProtectionMode||'ACTIVE',attemptId:gpsAttemptId,...aligned});
       logged=reply?.logged===true&&reply.code==='GPS_REPORT_RECORDED';
+      if(logged&&reply.classification==='B')classification='B';
     }catch(e){console.warn('GPS_PRECHECK_REPORT_UNAVAILABLE');}
     if(!current()||phase!=='reporting')return;
-    fail(logged?
-      'Pemeriksaan Lokasi Tidak Berhasil. Sistem menemukan pola lokasi yang tidak biasa. Jika menggunakan aplikasi pengubah lokasi, nonaktifkan terlebih dahulu, lalu ulangi absensi. Kejadian ini telah dicatat untuk ditinjau Operator.':
-      'Pemeriksaan Lokasi Tidak Berhasil. Sistem menemukan pola lokasi yang tidak biasa. Pastikan GPS aktif dan koneksi internet stabil. Jika menggunakan aplikasi pengubah lokasi, nonaktifkan terlebih dahulu, lalu ulangi absensi.');
+    fail(classification==='B'?locationHighRisk+
+      (logged?' Hasil pemeriksaan telah dicatat untuk ditinjau Operator.':''):
+      locationFailure);
   }
   function samplesReady(){
     if(info?.mobileTest||info?.gpsProtectionMode==='INACTIVE')return true;
     const cfg=gpsSettings();
-    return gpsSamples.length>=cfg.minSamples&&distinctInside()>=cfg.minDistinct&&!gpsPatternConcern()&&
+    return gpsSamples.length>=cfg.minSamples&&distinctInside()>=cfg.minDistinct&&
       gpsSamples.at(-1).at-gpsSamples[0].at>=cfg.minSpanMs&&
       Date.now()-gpsSamples.at(-1).at<=15000;
   }
@@ -133,6 +154,9 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     const recent=at-(gpsSettings().maxWaitMs+10000);
     gpsSamples=gpsSamples.filter(p=>p.at>=recent).slice(-gpsSettings().maxSamples);
     fix=sample;
+    // Pattern runs from the first available fixes; advisory only. Backend
+    // recomputes it when location is locked, never trusting this boolean.
+    gpsPatternAdvisory=gpsPatternConcern();
     updateFix();
   }
   const closeButton=dialog.querySelector('#close');
@@ -179,13 +203,10 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     const good=fix&&Date.now()-fix.at<=15000&&Date.now()>=fix.at-1000;
     const ready=samplesReady(),elapsed=gpsStartedAt?Date.now()-gpsStartedAt:0;
     const inside=good&&gpsInside(fix);
-    // A persistent static position can be reported before 120 seconds. A
-    // sample count alone is not a verdict: server validates elapsed span too.
-    if(!info.mobileTest&&info.gpsProtectionMode!=='INACTIVE'&&
-       ((elapsed>=90000&&gpsStaticLongEnough())||
-        (elapsed>=gpsSettings().maxWaitMs&&gpsSamples.length>=gpsSettings().minSamples&&
-         gpsPatternConcern()&&Date.now()-gpsSamples.at(-1).at<=15000&&
-         gpsSamples.at(-1).at-gpsSamples[0].at>=45000))){
+    // A/B only when the prelock series has enough fresh measurements and
+    // independent time span. Pattern alone never prevents a healthy lock.
+    if(!info.mobileTest&&info.gpsProtectionMode!=='INACTIVE'&&elapsed>=90000&&
+       gpsPrelockClassification()){
       reportPrelock().catch(()=>fail(locationFailure));return;
     }
     if(!info.mobileTest&&gpsStartedAt&&elapsed>=gpsSettings().maxWaitMs&&
