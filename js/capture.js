@@ -26,8 +26,8 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   panel.innerHTML='<section class="capture" data-view="location"><div class="camera-box"><video muted autoplay playsinline></video>'+
     '<img class="proof-preview" alt="Foto presensi untuk ditinjau" hidden></div><header class="camera-header"><h2 id="capture-title"></h2>'+
     '<small class="mobile-test-banner" hidden></small></header><div class="face-guide" aria-hidden="true"></div>'+
-    '<div class="capture-dock"><div class="capture-geo"><b class="office-name">Lokasi presensi</b>'+
-    '<div class="office-map" aria-label="Peta kantor dan perangkat"></div><small class="map-key">● Kantor dan radius &nbsp; <b>● Perangkat</b></small><div class="capture-location-loading" aria-hidden="true"><span class="capture-location-spinner"></span></div><p class="fix" role="status" aria-live="polite"></p></div>'+
+    '<div class="capture-dock"><div class="capture-geo"><h3 class="capture-geo-title">Memeriksa lokasi</h3><b class="office-name">Lokasi presensi</b>'+
+    '<div class="office-map" aria-label="Peta kantor dan perangkat"></div><small class="map-key">● Kantor dan radius &nbsp; <b>● Perangkat</b></small><div class="capture-location-status"><div class="capture-location-loading" aria-hidden="true"><span class="capture-location-spinner"></span></div><p class="fix" role="status" aria-live="polite"></p></div></div>'+
     '<ol class="challenge-list" aria-label="Tiga tantangan wajah" hidden></ol><div class="capture-status" role="status"></div>'+
     '<p class="countdown" hidden></p><div class="capture-actions"><button class="primary" data-c="lock" disabled>Kunci Lokasi</button>'+
     '<button class="primary" data-c="send" hidden>Kirim Presensi</button><button class="secondary" data-c="retake" hidden>Ambil Ulang Foto</button></div></div></section>';
@@ -50,8 +50,9 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   const abort=new AbortController(),events={signal:abort.signal};
   let phase='setup',stream,model,watch=null,frame=0,pulse=null,office,info,fix,lockState,image='',steps=[],digest='',
     frontReady=false,infoAt=0,expiresPerf=0,expiresWall=0,disposed=false,challengeEnd=0;
-  let gpsSamples=[],gpsStartedAt=0,gpsPollAt=0,gpsPolling=false;
-  function gpsSettings(){return info?.gpsPrecheck||{minSamples:8,minDistinct:4,minSpanMs:3000,
+  let gpsSamples=[],gpsStartedAt=0,gpsPollAt=0,gpsPolling=false,gpsReportSent=false;
+  const gpsAttemptId=crypto.randomUUID?.()||'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const n=crypto.getRandomValues(new Uint8Array(1))[0]&15;return (c==='x'?n:((n&3)|8)).toString(16);});
+  function gpsSettings(){return info?.gpsPrecheck||{minSamples:8,minDistinct:3,minSpanMs:3000,
     initialWaitMs:60000,maxWaitMs:120000,maxSamples:15};}
   function gpsInside(sample){
     return office&&sample&&sample.gpsAccuracy>0&&sample.gpsAccuracy<=office.maxAccuracy&&
@@ -65,10 +66,58 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     }
     return unique.length;
   }
+  // HF12: pattern analysis starts with the first GPS samples. Report only
+  // persistent independent patterns. The decimal text supplied by Android is
+  // unavailable through Geolocation API: JS Numbers lose trailing zeros.
+  function gpsPatternConcern(){
+    const unique=[];
+    for(const s of gpsSamples){
+      if(!gpsInside(s))continue;
+      if(!unique.some(p=>distanceTo({lat:p.latitude,lon:p.longitude},s)<=0.01))unique.push(s);
+    }
+    if(unique.length<3)return false;
+    const repeated=n=>{const t=(Math.abs(n)%1).toFixed(8).slice(2).replace(/0+$/,'');return /^(\d)\1{3,}$/.test(t);};
+    const coarse=n=>(Math.abs(n)%1).toFixed(8).slice(2).replace(/0+$/,'').length<=3;
+    const both=unique.filter(s=>repeated(s.latitude)&&repeated(s.longitude)).length;
+    const rounded=unique.filter(s=>coarse(s.latitude)&&coarse(s.longitude)).length;
+    return both/unique.length>=2/3||rounded/unique.length>=.85;
+  }
+  function gpsStaticLongEnough(){
+    return gpsSamples.length>=gpsSettings().minSamples&&
+      gpsSamples.at(-1).at-gpsSamples[0].at>=45000&&
+      Date.now()-gpsSamples.at(-1).at<=15000&&
+      gpsSamples.every(s=>s.latitude===gpsSamples[0].latitude&&s.longitude===gpsSamples[0].longitude)&&
+      gpsInside(gpsSamples.at(-1));
+  }
+  function serverAligned(){
+    const newest=gpsSamples.at(-1);if(!newest)return null;
+    const measuredAt=Math.round(info.serverNow+(performance.now()-infoAt)-(Date.now()-newest.at));
+    const samples=gpsSamples.map(s=>({latitude:s.latitude,longitude:s.longitude,
+      gpsAccuracy:s.gpsAccuracy,measuredAt:measuredAt-(newest.at-s.at)}));
+    return {fix:{...newest,measuredAt},samples};
+  }
+  async function reportPrelock(){
+    if(gpsReportSent||!current()||phase!=='location'||info?.mobileTest||
+       info?.gpsProtectionMode==='INACTIVE')return;
+    const aligned=serverAligned();if(!aligned)return;
+    gpsReportSent=true;phase='reporting';lock.disabled=true;lock.textContent='Memeriksa lokasi…';
+    status.textContent='';fixText.textContent='Pemeriksaan lokasi belum berhasil. Menyiapkan hasil pemeriksaan…';
+    let logged=false;
+    try{
+      const reply=await api('CAPTURE_GPS_REPORT',{type,testRunId:info.testRunId,
+        scheduleId:info.scheduleId,shiftDate:info.shiftDate,officeId:office.id,
+        gpsProtectionMode:info.gpsProtectionMode||'ACTIVE',attemptId:gpsAttemptId,...aligned});
+      logged=reply?.logged===true&&reply.code==='GPS_REPORT_RECORDED';
+    }catch(e){console.warn('GPS_PRECHECK_REPORT_UNAVAILABLE');}
+    if(!current()||phase!=='reporting')return;
+    fail(logged?
+      'Pemeriksaan Lokasi Tidak Berhasil. Sistem menemukan pola lokasi yang tidak biasa. Jika menggunakan aplikasi pengubah lokasi, nonaktifkan terlebih dahulu, lalu ulangi absensi. Kejadian ini telah dicatat untuk ditinjau Operator.':
+      'Pemeriksaan Lokasi Tidak Berhasil. Sistem menemukan pola lokasi yang tidak biasa. Pastikan GPS aktif dan koneksi internet stabil. Jika menggunakan aplikasi pengubah lokasi, nonaktifkan terlebih dahulu, lalu ulangi absensi.');
+  }
   function samplesReady(){
     if(info?.mobileTest||info?.gpsProtectionMode==='INACTIVE')return true;
     const cfg=gpsSettings();
-    return gpsSamples.length>=cfg.minSamples&&distinctInside()>=cfg.minDistinct&&
+    return gpsSamples.length>=cfg.minSamples&&distinctInside()>=cfg.minDistinct&&!gpsPatternConcern()&&
       gpsSamples.at(-1).at-gpsSamples[0].at>=cfg.minSpanMs&&
       Date.now()-gpsSamples.at(-1).at<=15000;
   }
@@ -130,17 +179,27 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     const good=fix&&Date.now()-fix.at<=15000&&Date.now()>=fix.at-1000;
     const ready=samplesReady(),elapsed=gpsStartedAt?Date.now()-gpsStartedAt:0;
     const inside=good&&gpsInside(fix);
-    // Timeout is about a usable location, not merely having enough GPS samples.
-    // In both modes, never leave the user waiting indefinitely outside the geofence.
+    // A persistent static position can be reported before 120 seconds. A
+    // sample count alone is not a verdict: server validates elapsed span too.
+    if(!info.mobileTest&&info.gpsProtectionMode!=='INACTIVE'&&
+       ((elapsed>=90000&&gpsStaticLongEnough())||
+        (elapsed>=gpsSettings().maxWaitMs&&gpsSamples.length>=gpsSettings().minSamples&&
+         gpsPatternConcern()&&Date.now()-gpsSamples.at(-1).at<=15000&&
+         gpsSamples.at(-1).at-gpsSamples[0].at>=45000))){
+      reportPrelock().catch(()=>fail(locationFailure));return;
+    }
     if(!info.mobileTest&&gpsStartedAt&&elapsed>=gpsSettings().maxWaitMs&&
        (!good||!inside||!ready)){
       fail(locationFailure);return;
     }
     lock.disabled=!(phase==='location'&&inside&&ready&&model&&frontReady&&video.readyState>=2);
+    lock.textContent=inside&&ready?'Kunci Lokasi':'Menunggu lokasi…';
+    if(phase==='location')status.textContent=inside&&ready?'Hadapkan wajah ke kamera, lalu kunci lokasi.':'';
     gpsLoader.hidden=!!info.mobileTest||(inside&&ready);
     const gpsMessage=info.mobileTest?'MODE UJI · Lokasi simulasi':
       !good||!ready?(elapsed>=gpsSettings().initialWaitMs?
-        locationWaiting:locationLoading):
+        (gpsSamples.length>=gpsSettings().minSamples&&distinctInside()<=1?
+          'Lokasi belum menunjukkan perubahan yang cukup. Pastikan GPS aktif dan koneksi internet stabil. Sistem masih memeriksa, tidak perlu menekan tombol berulang kali.':locationWaiting):locationLoading):
       inside?'Lokasi siap. Silakan kunci lokasi.':'Lokasi belum sesuai area kerja. Pastikan GPS aktif dan koneksi internet stabil, lalu coba berada lebih dekat ke kantor atau di area terbuka.';
     if(fixText.textContent!==gpsMessage)fixText.textContent=gpsMessage;
     drawOfficeMap(map,office,good?fix:null);
@@ -185,7 +244,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     if(!current()||phase!=='setup')return;
     const detector=await loadLandmarker().catch(()=>{throw Error('Pemeriksaan wajah belum siap. Periksa koneksi internet lalu rekam ulang.');});
     if(!current()||phase!=='setup'){detector.close();return;}
-    model=detector;phase='location';status.textContent='Hadapkan wajah ke kamera, lalu kunci lokasi.';
+    model=detector;phase='location';status.textContent='';
     let stable=0,lastInference=-1000,lastTime=-1;
     function align(t){
       if(!current()||phase!=='location')return;
@@ -206,9 +265,9 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     updateFix();if(lock.disabled||phase!=='location')return;
     phase='locking';busyButton(lock,'Mengunci lokasi…',true);status.textContent='Menyiapkan langkah berikutnya…';
     if(info.mobileTest)fix.at=Date.now();
-    const measuredAt=Math.round(info.serverNow+(performance.now()-infoAt)-(Date.now()-fix.at));
-    const alignedSamples=info.mobileTest?[]:gpsSamples.map(s=>({latitude:s.latitude,longitude:s.longitude,
-      gpsAccuracy:s.gpsAccuracy,measuredAt:measuredAt-(fix.at-s.at)}));
+    const aligned=info.mobileTest?null:serverAligned();
+    const measuredAt=info.mobileTest?Math.round(info.serverNow+(performance.now()-infoAt)-(Date.now()-fix.at)):aligned.fix.measuredAt;
+    const alignedSamples=info.mobileTest?[]:aligned.samples;
     const reply=await timedCall('CAPTURE_LOCK',{type,testRunId:info.testRunId,scheduleId:info.scheduleId,shiftDate:info.shiftDate,
       officeId:office.id,gpsProtectionMode:info.gpsProtectionMode||'ACTIVE',fix:{...fix,measuredAt},
       samples:info.gpsProtectionMode==='INACTIVE'?[]:alignedSamples});

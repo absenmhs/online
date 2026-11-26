@@ -1110,3 +1110,15 @@ dialog.recording{
 .late-selected-head b{min-width:0;overflow-wrap:anywhere}
 .late-selected-head button{color:#125f9b;font-size:.72rem;font-weight:650;text-align:right}
 @media(max-width:365px){.late-person{grid-template-columns:minmax(70px,1fr) minmax(60px,1fr) 57px;gap:6px}.late-person-min small{display:none}.late-kpi strong{font-size:1.03rem}.late-kpis-three .late-kpi strong{font-size:1.1rem}.late-kpi small{font-size:.69rem}}
+
+/* HF12: calm information hierarchy during live location checks. */
+.recording .capture-geo-title{margin:0 0 4px;font-size:clamp(1rem,3.1vw,1.13rem);line-height:1.3;font-weight:750;color:#fff}
+.recording .capture-geo .office-name{display:block;font-size:clamp(.77rem,2.5vw,.9rem);font-weight:600;line-height:1.35;color:#d6e4ed;overflow-wrap:anywhere}
+.recording .capture-geo .office-map{height:clamp(68px,12dvh,113px);margin:8px 0 4px}
+.recording .capture-geo .map-key{font-size:.73rem;line-height:1.35;color:#c8d5df}
+.recording .capture-location-status{display:flex;align-items:flex-start;gap:11px;margin-top:9px;min-height:42px}
+.recording .capture-location-loading{min-width:27px;flex:0 0 27px;min-height:27px;margin:0;padding-top:2px}
+.recording .capture-geo .fix{font-size:clamp(.85rem,2.8vw,.94rem);font-weight:450;line-height:1.45;margin:0!important;overflow-wrap:break-word;flex:1}
+.recording .capture-dock .capture-status{font-size:clamp(.88rem,2.9vw,.98rem);line-height:1.4;font-weight:650}
+.recording .capture-dock{gap:10px;padding:clamp(12px,3vw,16px)}
+.recording .capture-actions button[disabled]{opacity:.65;cursor:not-allowed}
