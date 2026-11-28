@@ -1,5 +1,6 @@
 import {loadLandmarker,readPose,poseMatches,directions} from './liveness.js';
-import {drawOfficeMap,distanceTo} from './office-map.js';
+import {distanceTo} from './office-map.js';
+import {drawCaptureOfficeMap} from './capture-office-map14.js';
 
 function snapshot(video){
   const canvas=document.createElement('canvas'),scale=Math.min(1,512/Math.max(video.videoWidth,video.videoHeight));
@@ -17,7 +18,7 @@ async function digestPhoto(url){
   return Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
 }
 function cameraError(e){
-  if(e.name==='NotAllowedError')return 'Izinkan kamera untuk situs ini, kemudian buka kembali perekaman.';
+  if(e.name==='NotAllowedError')return 'Kamera belum mendapat izin. Izinkan kamera untuk situs ini, kemudian rekam ulang.';
   if(e.name==='NotReadableError')return 'Kamera sedang dipakai. Tutup aplikasi kamera lain dan coba lagi.';
   return 'Kamera depan belum tersedia. Periksa izin dan perangkat kamera.';
 }
@@ -27,16 +28,17 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     '<img class="proof-preview" alt="Foto presensi untuk ditinjau" hidden></div><header class="camera-header"><h2 id="capture-title"></h2>'+
     '<small class="mobile-test-banner" hidden></small></header><div class="face-guide" aria-hidden="true"></div>'+
     '<div class="capture-dock"><div class="capture-geo"><h3 class="capture-geo-title">Memeriksa lokasi</h3><b class="office-name">Lokasi presensi</b>'+
-    '<div class="office-map" aria-label="Peta kantor dan perangkat"></div><small class="map-key">● Kantor dan radius &nbsp; <b>● Perangkat</b></small><div class="capture-location-status"><div class="capture-location-loading" aria-hidden="true"><span class="capture-location-spinner"></span></div><p class="fix" role="status" aria-live="polite"></p></div></div>'+
+    '<div class="office-map hf14-map" aria-label="Peta target presensi dan lokasi perangkat"></div><div class="hf14-map-legend"><span><i class="hf14-swatch hf14-swatch-office"></i> Titik kantor</span><span><i class="hf14-swatch hf14-swatch-device"></i> Perangkat Anda</span></div><p class="capture-distance" role="status"></p><div class="capture-location-status"><div class="capture-location-loading" aria-hidden="true"><span class="capture-location-spinner"></span></div><p class="fix" role="status" aria-live="polite"></p></div></div>'+
     '<ol class="challenge-list" aria-label="Tiga tantangan wajah" hidden></ol><div class="capture-camera-state"><span class="capture-camera-label">Kamera</span><div class="capture-status" role="status"></div></div>'+
     '<div class="capture-failure" role="alert" hidden><h3 class="capture-failure-heading"></h3><p class="capture-failure-detail"></p></div>'+
     '<p class="countdown" hidden></p><div class="capture-actions"><button class="primary" data-c="lock" disabled>Kunci Lokasi</button>'+
+    '<button class="primary" data-c="start" hidden disabled>Mulai Tantangan</button>'+
     '<button class="primary" data-c="send" hidden>Kirim Presensi</button><button class="secondary" data-c="retake" hidden>Ambil Ulang Foto</button></div></div></section>';
   panel.querySelector('h2').textContent=title;
   dialog.classList.add('recording');dialog.setAttribute('aria-labelledby','capture-title');
   if(!dialog.open)dialog.showModal();
   const $=s=>panel.querySelector(s),video=$('video'),photo=$('.proof-preview'),status=$('.capture-status'),geo=$('.capture-geo'),
-    clock=$('.countdown'),fixText=$('.fix'),gpsLoader=$('.capture-location-loading'),map=$('.office-map'),banner=$('.mobile-test-banner'),lock=$('[data-c=lock]'),submit=$('[data-c=send]'),retake=$('[data-c=retake]');
+    clock=$('.countdown'),fixText=$('.fix'),gpsLoader=$('.capture-location-loading'),map=$('.office-map'),banner=$('.mobile-test-banner'),lock=$('[data-c=lock]'),start=$('[data-c=start]'),submit=$('[data-c=send]'),retake=$('[data-c=retake]'),distanceText=$('.capture-distance');
   const capture=$('.capture'),list=$('.challenge-list'),gpsFailure=$('.capture-failure'),gpsFailureTitle=$('.capture-failure-heading'),gpsFailureDetail=$('.capture-failure-detail');
   // HF12-R4: four user-facing outcomes, with internal codes never printed.
   // Security thresholds, raw counts, and pattern flags stay in operator logs.
@@ -62,7 +64,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   }
   const abort=new AbortController(),events={signal:abort.signal};
   let phase='setup',stream,model,watch=null,frame=0,pulse=null,office,info,fix,lockState,image='',steps=[],digest='',
-    frontReady=false,infoAt=0,expiresPerf=0,expiresWall=0,disposed=false,challengeEnd=0;
+    frontReady=false,infoAt=0,expiresPerf=0,expiresWall=0,disposed=false,challengeEnd=0,facePrepUntil=0;
   let gpsSamples=[],gpsHistory=[],gpsStartedAt=0,gpsPollAt=0,gpsPolling=false,gpsReportSent=false,gpsPatternAdvisory=false;
   let gpsRawCount=0,gpsDuplicateTimestampCount=0,gpsInvalidCount=0,faceWaitAt=0;
   const gpsAttemptId=crypto.randomUUID?.()||'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const n=crypto.getRandomValues(new Uint8Array(1))[0]&15;return (c==='x'?n:((n&3)|8)).toString(16);});
@@ -226,7 +228,7 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   function fail(message){
     if(!current())return;
     phase='failed';capture.dataset.view='failed';list.hidden=true;gpsLoader.hidden=true;status.classList.remove('capture-working');halt();forget();video.hidden=true;geo.hidden=true;clock.hidden=true;
-    closeButton.disabled=retake.disabled=false;lock.hidden=submit.hidden=true;retake.hidden=false;retake.textContent='Rekam ulang';
+    closeButton.disabled=retake.disabled=false;lock.hidden=start.hidden=submit.hidden=true;retake.hidden=false;retake.textContent='Rekam ulang';
     // HF12-R3: title and explanatory text occupy separate visual panels.
     // A/B/C/D codes remain internal and never appear in employee-facing text.
     if(message&&typeof message==='object'&&['A','B','C','D'].includes(message.classification)&&
@@ -249,13 +251,11 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     fail(describe(e));
   }
   function updateFix(){
-    if(!current()||!['setup','location'].includes(phase)||!office)return;
-    if(info?.mobileTest && fix)fix.at=Date.now(); // Synthetic GPS never ages while the test screen is open.
+    if(!current()||phase!=='location'||!office)return;
+    if(info?.mobileTest&&fix)fix.at=Date.now();
     const good=fix&&Date.now()-fix.at<=15000&&Date.now()>=fix.at-1000;
     const ready=samplesReady(),elapsed=gpsStartedAt?Date.now()-gpsStartedAt:0;
     const inside=good&&gpsInside(fix);
-    // Early stop only for a corroborated B (long, low-variation plus strong
-    // numeric pattern). Other failures retain the full 120-second window.
     if(!info.mobileTest&&info.gpsProtectionMode!=='INACTIVE'&&elapsed>=90000&&
        gpsPrelockClassification()==='B'){
       reportPrelock().catch(()=>fail(locationFailure));return;
@@ -264,31 +264,23 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
        (!good||!inside||!ready)){
       reportPrelock().catch(()=>fail(locationFailure));return;
     }
-    const cameraReady=phase==='location'&&!!model&&frontReady&&video.readyState>=2;
     const gpsReady=!!(inside&&ready);
-    if(phase==='location'&&model&&gpsReady&&!frontReady){
-      if(!faceWaitAt)faceWaitAt=Date.now();
-      if(Date.now()-faceWaitAt>=60000){
-        fail('Kamera belum dapat memastikan wajah. Pastikan wajah terlihat jelas dan pencahayaan cukup, lalu rekam ulang.');
-        return;
-      }
-    }else faceWaitAt=0;
-    lock.disabled=!(cameraReady&&gpsReady);
-    lock.textContent=phase==='setup'?'Menyiapkan kamera':
-      !cameraReady?'Menunggu kamera':!gpsReady?'Menunggu lokasi':'Kunci Lokasi';
-    if(phase==='location'){
-      const cameraMessage=!frontReady?'Hadapkan wajah ke kamera dan pastikan pencahayaan cukup.':
-        gpsReady?'Wajah dan lokasi siap. Silakan kunci lokasi.':'Wajah siap. Menunggu lokasi.';
-      if(status.textContent!==cameraMessage)status.textContent=cameraMessage;
-    }
+    lock.disabled=!gpsReady;
+    lock.textContent=gpsReady?'Kunci Lokasi':'Menunggu lokasi';
     gpsLoader.hidden=!!info.mobileTest||gpsReady;
     const gpsMessage=info.mobileTest?'MODE UJI · Lokasi simulasi':
       !good||!ready?(elapsed>=gpsSettings().initialWaitMs?
         (gpsSamples.length>=gpsSettings().minSamples&&distinctInside()<=1?
           'Sedang memuat pola lokasi. Pastikan GPS aktif dan koneksi internet stabil.':locationWaiting):locationLoading):
-      inside?'Lokasi siap.':'Lokasi belum sesuai area kerja. Pastikan Anda berada di kantor dan GPS aktif.';
+      inside?'Lokasi memenuhi persyaratan. Silakan kunci lokasi.':
+        'Lokasi belum sesuai area kerja. Pastikan posisi perangkat berada dekat titik kantor.';
     if(fixText.textContent!==gpsMessage)fixText.textContent=gpsMessage;
-    drawOfficeMap(map,office,good?fix:null);
+    const meters=good?distanceTo(office,fix):null;
+    distanceText.textContent=meters===null?
+      'Titik ungu menunjukkan pusat kantor. Titik biru akan muncul saat GPS tersedia.':
+      `Perkiraan jarak: ${Math.round(meters)} m · Radius kantor: ${Math.round(office.radius)} m. `+
+      (gpsReady?'Lokasi siap.':'Akurasi GPS juga diperhitungkan.');
+    drawCaptureOfficeMap(map,office,good?fix:null);
   }
   // Some browsers emit watchPosition only when movement is detected. Request
   // additional fresh fixes without inventing motion or reusing timestamps.
@@ -302,28 +294,54 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   }
   async function setup(){
     if(!navigator.onLine)throw Error('Hubungkan internet untuk memulai sesi perekaman.');
-    if(!navigator.mediaDevices?.getUserMedia)throw Error('Browser memerlukan akses kamera melalui HTTPS.');
-    status.textContent='Memeriksa jadwal dan lokasi kantor…';
+    status.textContent='Memeriksa jadwal dan lokasi kantor.';
     info=await timedCall('CAPTURE_INFO',{type});if(!current())return;
     if(!info.mobileTest&&!navigator.geolocation)throw Error('Browser memerlukan akses lokasi melalui HTTPS.');
     infoAt=performance.now();office=info.office;$('.office-name').textContent=office.name;
     banner.hidden=info.mobileTest!==true;
     if(info.mobileTest){
       banner.textContent='MODE UJI · GPS simulasi'+(info.testRunId?' · '+info.testRunId.slice(0,8):'');
-      if(!info.testFix)throw Error('Pembaruan kamera memerlukan backend 2.1.0.');
-      fix={...info.testFix,at:Date.now()};
-      fixText.textContent='GPS SIMULASI (bukan lokasi ponsel)';gpsLoader.hidden=true;
+      if(!info.testFix)throw Error('Mode uji GPS belum tersedia di backend.');
+      fix={...info.testFix,at:Date.now()};gpsLoader.hidden=true;
     }
-    updateFix();
-    status.textContent='Menyiapkan kamera dan pemeriksaan wajah.';
-    if(!info.mobileTest)fixText.textContent=locationLoading;
+    // HF14: GPS is window one. No camera permission, MediaPipe download,
+    // or face-readiness requirement can block locking a valid location.
+    phase='location';gpsStartedAt=info.mobileTest?0:Date.now();
+    status.textContent='';
     if(!info.mobileTest){
-      // Collect GPS in parallel, but do NOT consume its 120-second timeout while
-      // the camera model is still downloading or initializing.
       watch=navigator.geolocation.watchPosition(collectPosition,
-        e=>{if(e.code===1){fail(locationFailure);return;}fix=null;fixText.textContent=locationLoading;updateFix();},
+        e=>{if(e.code===1){fail(locationFailure);return;}fix=null;updateFix();},
         {enableHighAccuracy:true,maximumAge:0,timeout:15000});
     }
+    updateFix();
+  }
+  async function begin(){
+    updateFix();if(lock.disabled||phase!=='location')return;
+    phase='locking';busyButton(lock,'Mengunci lokasi…',true);
+    if(info.mobileTest)fix.at=Date.now();
+    const aligned=info.mobileTest?null:serverAligned();
+    const measuredAt=info.mobileTest?
+      Math.round(info.serverNow+(performance.now()-infoAt)-(Date.now()-fix.at)):
+      aligned.fix.measuredAt;
+    const reply=await timedCall('CAPTURE_LOCK',{type,testRunId:info.testRunId,
+      scheduleId:info.scheduleId,shiftDate:info.shiftDate,officeId:office.id,
+      flow:'STAGED_HF14',gpsProtectionMode:info.gpsProtectionMode||'ACTIVE',
+      fix:{...fix,measuredAt},samples:info.gpsProtectionMode==='INACTIVE'?[]:aligned.samples});
+    if(!current()||phase!=='locking')return;
+    if(reply.code!=='LOCATION_LOCKED_PENDING_FACE'||!reply.submissionId||
+       !Number.isFinite(reply.facePrepEnds))throw Error('Alur pemeriksaan wajah HF14 belum aktif di backend. Perbarui deployment Apps Script.');
+    lockState=reply;
+    facePrepUntil=performance.now()+Math.max(0,reply.facePrepEnds-reply.serverNow-2000);
+    if(watch!==null){navigator.geolocation.clearWatch(watch);watch=null;}
+    gpsLoader.hidden=true;geo.hidden=true;lock.hidden=true;
+    phase='faceSetup';capture.dataset.view='face';
+    start.hidden=false;start.disabled=true;start.textContent='Menyiapkan kamera';
+    status.hidden=false;status.textContent='Menyiapkan kamera untuk pemeriksaan wajah.';
+    await prepareFace();
+  }
+  async function prepareFace(){
+    if(!current()||phase!=='faceSetup')return;
+    if(!navigator.mediaDevices?.getUserMedia)throw Error('Kamera memerlukan izin dan koneksi aman HTTPS.');
     let device;
     try{
       device=await boundedCamera(navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'user'},
@@ -331,61 +349,62 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
         'Kamera belum merespons. Periksa izin kamera, lalu rekam ulang.',
         late=>late?.getTracks().forEach(t=>t.stop()));
     }catch(e){throw Error(e.name==='NotAllowedError'||e.name==='NotReadableError'?cameraError(e):e.message||cameraError(e));}
-    if(!current()||phase!=='setup'){device.getTracks().forEach(t=>t.stop());return;}
-    stream=device;video.srcObject=stream;
+    if(!current()||phase!=='faceSetup'){device.getTracks().forEach(t=>t.stop());return;}
+    stream=device;video.srcObject=stream;video.hidden=false;
     await boundedCamera(video.play(),12000,'Kamera belum menampilkan gambar. Silakan rekam ulang.');
-    if(!current()||phase!=='setup')return;
+    if(!current()||phase!=='faceSetup')return;
     let detector;
     for(let attempt=0;attempt<2;attempt++){
-      if(!current()||phase!=='setup')return;
-      status.textContent=attempt?'Mencoba menyiapkan pemeriksaan wajah kembali.':
-        'Menyiapkan pemeriksaan wajah.';
+      if(!current()||phase!=='faceSetup')return;
+      status.textContent=attempt?'Mencoba menyiapkan kamera kembali.':'Menyiapkan pemeriksaan wajah.';
       try{
         detector=await boundedCamera(loadLandmarker(),25000,
           'Kamera belum siap untuk pemeriksaan wajah. Periksa koneksi internet, lalu rekam ulang.',
-          late=>late?.close());
-        break;
+          late=>late?.close());break;
       }catch(e){
-        if(!current()||phase!=='setup')return;
+        if(!current()||phase!=='faceSetup')return;
         if(attempt===1)throw Error('Kamera belum siap untuk pemeriksaan wajah. Periksa koneksi internet, lalu rekam ulang.');
       }
     }
-    if(!current()||phase!=='setup'){detector?.close();return;}
-    model=detector;phase='location';
-    // The GPS window begins only once camera processing can actually proceed.
-    gpsStartedAt=info.mobileTest?0:Date.now();
+    if(!current()||phase!=='faceSetup'){detector?.close();return;}
+    model=detector;phase='faceReady';
     status.textContent='Hadapkan wajah ke kamera dan pastikan pencahayaan cukup.';
+    start.textContent='Menunggu wajah siap';
     let stable=0,lastInference=-1000,lastTime=-1,lastFrameAt=performance.now();
     function align(t){
-      if(!current()||phase!=='location')return;
+      if(!current()||phase!=='faceReady')return;
       try{
+        if(t>=facePrepUntil)throw Error('Waktu persiapan wajah habis. Silakan rekam ulang.');
         if(video.readyState>=2&&video.currentTime!==lastTime&&t-lastInference>=80){
           lastTime=video.currentTime;lastInference=t;lastFrameAt=t;
           const pose=readPose(model.detectForVideo(video,t));
           stable=poseMatches('neutral',pose)?stable+1:0;
           frontReady=stable>=3;
-          updateFix();
+          start.disabled=!frontReady;
+          const hint=frontReady?'Wajah siap. Tekan Mulai Tantangan.':
+            'Pastikan satu wajah terlihat jelas dan menghadap kamera.';
+          if(status.textContent!==hint)status.textContent=hint;
+          start.textContent=frontReady?'Mulai Tantangan':'Menunggu wajah siap';
         }
         if(t-lastFrameAt>12000)throw Error('Gambar kamera terhenti. Silakan rekam ulang.');
         frame=requestAnimationFrame(align);
-      }catch(error){fail(error.message||describe(error));}
+      }catch(e){fail(e.message||describe(e));}
     }
     frame=requestAnimationFrame(align);
   }
-  async function begin(){
-    updateFix();if(lock.disabled||phase!=='location')return;
-    phase='locking';busyButton(lock,'Mengunci lokasi…',true);status.textContent='Menyiapkan langkah berikutnya…';
-    if(info.mobileTest)fix.at=Date.now();
-    const aligned=info.mobileTest?null:serverAligned();
-    const measuredAt=info.mobileTest?Math.round(info.serverNow+(performance.now()-infoAt)-(Date.now()-fix.at)):aligned.fix.measuredAt;
-    const alignedSamples=info.mobileTest?[]:aligned.samples;
-    const reply=await timedCall('CAPTURE_LOCK',{type,testRunId:info.testRunId,scheduleId:info.scheduleId,shiftDate:info.shiftDate,
-      officeId:office.id,gpsProtectionMode:info.gpsProtectionMode||'ACTIVE',fix:{...fix,measuredAt},
-      samples:info.gpsProtectionMode==='INACTIVE'?[]:alignedSamples});
-    if(!current()||phase!=='locking')return;
-    lockState=reply;challengeEnd=performance.now()+reply.challengeEnds-reply.serverNow;
-    if(watch!==null){navigator.geolocation.clearWatch(watch);watch=null;}
-    gpsLoader.hidden=true;geo.hidden=true;lock.hidden=true;phase='challenge';capture.dataset.view='challenge';
+  async function startChallenge(){
+    if(phase!=='faceReady'||!frontReady||start.disabled||!lockState?.submissionId)return;
+    cancelAnimationFrame(frame);
+    phase='startingChallenge';busyButton(start,'Memulai tantangan…',true);
+    status.textContent='Menyiapkan instruksi pemeriksaan wajah.';
+    const reply=await timedCall('CAPTURE_START_CHALLENGE',{submissionId:lockState.submissionId});
+    if(!current()||phase!=='startingChallenge')return;
+    if(reply.code!=='CHALLENGE_STARTED'||!Array.isArray(reply.order)||reply.order.length!==3)
+      throw Error('Tantangan wajah belum dapat dimulai. Silakan rekam ulang.');
+    lockState={...lockState,...reply};
+    challengeEnd=performance.now()+Math.max(0,reply.challengeEnds-reply.serverNow-2000);
+    start.hidden=true;phase='challenge';capture.dataset.view='challenge';
+    list.replaceChildren();steps=[];
     reply.order.forEach(action=>{
       const li=document.createElement('li'),num=document.createElement('span');
       li.append(num,document.createTextNode(directions[action]));list.append(li);
@@ -395,7 +414,8 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
     function detect(t){
       if(!current()||phase!=='challenge')return;
       try{
-        if(t>=challengeEnd||t-stageStart>reply.stepSeconds*1000)throw Error('Waktu tantangan habis. Mulai lagi dari Kunci Lokasi.');
+        if(t>=challengeEnd||t-stageStart>reply.stepSeconds*1000)
+          throw Error('Waktu tantangan habis. Silakan rekam ulang.');
         if(video.currentTime!==lastTime&&video.readyState>=2&&t-lastInference>=80){
           lastTime=video.currentTime;lastInference=t;
           const pose=readPose(model.detectForVideo(video,t)),action=reply.order[steps.length];
@@ -488,16 +508,21 @@ export async function recordAttendance({dialog,title,type,call,send,checkReceipt
   dialog.addEventListener('close',()=>{if(!dialog.open)dispose();},events);
   window.addEventListener('pagehide',()=>{dispose();if(dialog.open)dialog.close();},{once:true,signal:abort.signal});
   document.addEventListener('visibilitychange',()=>{
-    if(document.hidden&&['setup','location','locking','challenge'].includes(phase))fail('Perekaman terjeda. Buka kembali kamera dan kunci lokasi.');
+    if(document.hidden&&['setup','location','locking','faceSetup','faceReady','startingChallenge','challenge'].includes(phase))fail('Perekaman terjeda. Buka kembali kamera dan kunci lokasi.');
     else updateClock();
   },events);
   panel.addEventListener('click',e=>{
     const key=e.target.closest('[data-c]')?.dataset.c;
     if(key==='lock')begin().catch(handleError);
+    if(key==='start')startChallenge().catch(handleError);
     if(key==='send')deliver().catch(handleError);
     if(key==='retake'&&!retake.hidden&&!retake.disabled){again=true;dialog.close();}
   },events);
   let again=false;
-  pulse=setInterval(()=>{if(!alive()){dispose();return;}requestExtraPosition();updateFix();updateClock();},500);
+  pulse=setInterval(()=>{if(!alive()){dispose();return;}
+    requestExtraPosition();updateFix();updateClock();
+    if(['faceSetup','faceReady'].includes(phase)&&facePrepUntil&&performance.now()>=facePrepUntil)
+      fail('Waktu persiapan wajah habis. Silakan rekam ulang.');
+  },500);
   setup().catch(handleError);await closed;return again;
 }

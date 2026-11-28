@@ -1158,3 +1158,58 @@ dialog.recording{
 .recording .capture[data-view=challenge] .capture-camera-state,
 .recording .capture[data-view=proof] .capture-camera-state{background:transparent;border:0;padding:0}
 @media(max-height:620px){.recording .capture-geo .office-map{height:70px}.recording .capture-dock{gap:8px}}
+
+/* HF14 v2.5.14 — two-screen capture, dynamic office + device marker map. */
+.recording .capture[data-view=location]{background:linear-gradient(155deg,#14212b 0%,#09131b 100%)}
+.recording .capture[data-view=location] .camera-box{display:none}
+.recording .capture[data-view=location] .capture-dock{
+  width:min(100%,46rem);max-height:calc(100% - 80px);margin:auto 0;
+  padding:clamp(13px,3.4vw,20px);gap:13px;background:#14212ef5;
+  border-color:#6e83934d;box-shadow:0 15px 45px #0007
+}
+.recording .capture[data-view=location] .capture-geo{display:grid;gap:8px;min-width:0}
+.recording .capture[data-view=location] .capture-geo-title{font-size:1.13rem;font-weight:750;margin:0;line-height:1.25}
+.recording .capture[data-view=location] .office-name{font-size:.92rem;line-height:1.35;color:#c2d3df}
+.recording .capture[data-view=location] .office-map{
+  width:100%;height:clamp(230px,43dvh,420px);min-height:230px;
+  margin:3px 0 0;border:1px solid #a4bdc5;border-radius:15px;background:#dce8e5
+}
+.recording .capture[data-view=location] .capture-camera-state,
+.recording .capture[data-view=location] .challenge-list{display:none!important}
+.recording .capture[data-view=location] .camera-header{flex-shrink:0}
+.recording .capture .hf14-map{position:relative;overflow:hidden;isolation:isolate}
+.hf14-tile-layer{position:absolute;inset:0;z-index:0}
+.hf14-tile-layer img{position:absolute;width:256px;height:256px;max-width:none;object-fit:cover}
+.hf14-map-overlays{position:absolute;inset:0;z-index:2;pointer-events:none}
+.hf14-map-radius{position:absolute;transform:translate(-50%,-50%);border:2px solid #8f55d9;background:#8d52d021;border-radius:50%;box-sizing:border-box}
+.hf14-map-pin{position:absolute;display:block;transform:translate(-50%,-50%);width:19px;height:19px;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #202f42,0 2px 8px #13202990;z-index:3}
+.hf14-map-office{background:#9350dc}
+.hf14-map-device{background:#168ed2;box-shadow:0 0 0 2px #0d64a7,0 2px 9px #15202988}
+.hf14-map-attribution{position:absolute;right:0;bottom:0;z-index:5;font-size:10px;line-height:16px;padding:0 5px;color:#25516b;background:#ffffffde}
+.hf14-map-legend{display:flex;align-items:center;gap:15px;flex-wrap:wrap;font-size:.81rem;font-weight:550;color:#dce7ef}
+.hf14-map-legend>span{display:flex;align-items:center;gap:7px}
+.hf14-swatch{display:inline-block;width:11px;height:11px;border-radius:50%;border:2px solid #fff;box-sizing:content-box}
+.hf14-swatch-office{background:#9350dc}.hf14-swatch-device{background:#168ed2}
+.recording .capture-dock .capture-distance{font-size:.82rem;line-height:1.4;color:#bed3e2;margin:0!important}
+.recording .capture[data-view=location] .capture-location-status{margin-top:0}
+.recording .capture[data-view=location] .fix{font-size:.9rem;line-height:1.5;font-weight:500}
+.recording .capture[data-view=location] .capture-actions button{min-height:52px}
+.recording .capture[data-view=face] .capture-geo,
+.recording .capture[data-view=face] .challenge-list{display:none!important}
+.recording .capture[data-view=face] .capture-dock{margin-top:auto}
+.recording .capture[data-view=face] .capture-camera-state{display:grid}
+.recording .capture[data-view=face] .camera-box video{display:block}
+.recording .capture[data-view=face] .face-guide{display:block;position:absolute;z-index:-1;left:50%;top:39%;transform:translate(-50%,-50%);width:min(66vw,34vh);aspect-ratio:3/4;border:2px solid #b2eff9a0;border-radius:43%}
+.recording .capture[data-view=face] .capture-camera-label{display:none}
+.recording .capture[data-view=face] .capture-status{font-size:1rem;line-height:1.5}
+.recording .capture[data-view=failed] .hf14-map{display:none}
+@media(max-height:620px){
+  .recording .capture[data-view=location] .office-map{height:clamp(180px,32dvh,250px);min-height:180px}
+  .recording .capture[data-view=location] .capture-dock{max-height:calc(100% - 62px)}
+}
+@media(max-width:360px){
+  .recording .capture[data-view=location] .office-map{height:clamp(220px,39dvh,310px)}
+  .hf14-map-legend{gap:9px;font-size:.76rem}
+}
+
+.hf14-pin-leader{position:absolute;display:block;height:2px;border-top:2px dashed #168ed2;transform-origin:0 50%;z-index:2}
